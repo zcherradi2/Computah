@@ -1,0 +1,150 @@
+<Window x:Class="Assist.BubbleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Claude" Width="488" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
+        WindowStartupLocation="Manual" Opacity="0"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="Fg" Color="#ECECEE"/>
+        <SolidColorBrush x:Key="Muted" Color="#8C8C96"/>
+        <SolidColorBrush x:Key="Accent" Color="#D97757"/>
+        <SolidColorBrush x:Key="CardBg" Color="#1C1C21"/>
+        <FontFamily x:Key="Icons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+        <!-- thin, quiet scrollbar -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}">
+                            <Track.Thumb>
+                                <Thumb>
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border CornerRadius="3" Background="#40FFFFFF"/>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="8" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#22FFFFFF"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#33FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="Root" Margin="16">
+        <Grid.RenderTransform>
+            <TranslateTransform x:Name="Slide"/>
+        </Grid.RenderTransform>
+
+        <!-- shadow lives on its own layer so text stays crisp -->
+        <Border CornerRadius="16" Background="{StaticResource CardBg}">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="5" Direction="270" Opacity="0.5" Color="Black"/>
+            </Border.Effect>
+        </Border>
+
+        <Border CornerRadius="16" Background="{StaticResource CardBg}" BorderBrush="#2AFFFFFF" BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- header (drag to move) -->
+                <Grid x:Name="Header" Margin="14,8,8,4" Background="Transparent" MouseLeftButtonDown="Header_MouseDown">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource Accent}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Claude" Foreground="{StaticResource Fg}" FontWeight="SemiBold"
+                               Margin="9,0,0,1" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" x:Name="StatusText" Foreground="{StaticResource Muted}" FontSize="12"
+                               Margin="10,1,6,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="3" Style="{StaticResource IconButton}" ToolTip="Copy last answer" Click="Copy_Click">
+                        <TextBlock x:Name="CopyGlyph" Text="&#xE8C8;" FontFamily="{StaticResource Icons}" FontSize="13"/>
+                    </Button>
+                    <Button Grid.Column="4" Style="{StaticResource IconButton}" ToolTip="Close (Esc)" Click="Close_Click">
+                        <TextBlock Text="&#xE8BB;" FontFamily="{StaticResource Icons}" FontSize="11"/>
+                    </Button>
+                </Grid>
+
+                <!-- what was captured -->
+                <WrapPanel x:Name="Chips" Grid.Row="1" Margin="14,0,14,4"/>
+
+                <!-- conversation -->
+                <ScrollViewer x:Name="Scroller" Grid.Row="2" MaxHeight="440" Padding="16,2,8,0"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              PreviewMouseWheel="Scroller_PreviewMouseWheel">
+                    <StackPanel x:Name="Messages" Margin="0,0,8,0"/>
+                </ScrollViewer>
+
+                <!-- composer -->
+                <Border Grid.Row="3" Margin="10,6,10,10" CornerRadius="12" Background="#27282D"
+                        BorderBrush="#2EFFFFFF" BorderThickness="1">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="Placeholder" Text="Ask a follow-up…" Foreground="{StaticResource Muted}"
+                                   Margin="13,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBox x:Name="Input" Background="Transparent" BorderThickness="0"
+                                 Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}"
+                                 SelectionBrush="{StaticResource Accent}" FocusVisualStyle="{x:Null}"
+                                 Padding="9,9,4,9" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="130"
+                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Center"
+                                 PreviewKeyDown="Input_PreviewKeyDown" TextChanged="Input_TextChanged"/>
+                        <Button x:Name="SendBtn" Grid.Column="1" Style="{StaticResource IconButton}"
+                                Margin="0,0,5,5" VerticalAlignment="Bottom" ToolTip="Send (Enter)" Click="Send_Click">
+                            <TextBlock Text="&#xE724;" FontFamily="{StaticResource Icons}" FontSize="14"
+                                       Foreground="{StaticResource Accent}"/>
+                        </Button>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

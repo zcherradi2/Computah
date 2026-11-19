@@ -1,0 +1,9 @@
+{
+  "model": "sonnet",
+  "instruction": "Look at my screen around the mouse pointer, plus any selected text and clipboard content. Work out what I most likely need help with and help directly: answer, explain, fix, translate or suggest the next step. Be concise.",
+  "systemPrompt": "You are a fast desktop assistant shown in a small floating chat bubble next to the user\u0027s mouse. Answer briefly and directly. Use plain text: short paragraphs and simple \u0027-\u0027 bullets. No headings, no tables, no bold/italics markup. Code may go in plain indented lines.",
+  "captureSelection": true,
+  "sendCursorCrop": true,
+  "loadMcpServers": false,
+  "allowedTools": ""
+}
