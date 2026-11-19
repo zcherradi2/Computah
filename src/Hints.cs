@@ -236,7 +236,7 @@ public sealed class HintOverlay : Window
         var tg = new TransformGroup();
         tg.Children.Add(new TranslateTransform(0, 6));                 // keep the tip just off the target
         tg.Children.Add(bob);
-        tg.Children.Add(new ScaleTransform(flipX ^ flipY ? -1.15 : 1.15, 1.15));
+        tg.Children.Add(new ScaleTransform(flipX ^ flipY ? -0.9 : 0.9, 0.9));
         tg.Children.Add(new RotateTransform(angle));
         tg.Children.Add(new TranslateTransform(p.X, p.Y));
         hand.RenderTransform = tg;
@@ -327,23 +327,39 @@ public sealed class HintOverlay : Window
     static Canvas MakeHand()
     {
         var c = new Canvas { Effect = new DropShadowEffect { BlurRadius = 10, ShadowDepth = 3, Direction = 300, Opacity = 0.45, Color = Colors.Black } };
-        Rectangle Part(double x, double y, double w, double h, double r, Brush? fill = null, double angle = 0)
+        static Geometry R(double x, double y, double w, double h, double r, double angle = 0)
         {
-            var s = new Rectangle { Width = w, Height = h, RadiusX = r, RadiusY = r, Fill = fill ?? Glove, Stroke = Ink, StrokeThickness = 2.4 };
-            if (angle != 0) { s.RenderTransformOrigin = new Point(0.5, 0.5); s.RenderTransform = new RotateTransform(angle); }
-            Canvas.SetLeft(s, x); Canvas.SetTop(s, y);
-            c.Children.Add(s);
-            return s;
+            var g = new RectangleGeometry(new Rect(x, y, w, h), r, r);
+            if (angle != 0) g.Transform = new RotateTransform(angle, x + w / 2, y + h / 2);
+            return g;
         }
-        Part(-7, 0, 14, 48, 7);                 // index finger
-        Part(-17, 44, 14, 26, 7, angle: -22);   // thumb
-        Part(-10, 32, 42, 40, 14);              // fist
-        Part(9, 35, 27, 12, 6);                 // folded fingers
-        Part(9, 46, 27, 12, 6);
-        Part(9, 57, 25, 12, 6);
-        Part(-12, 68, 46, 14, 4, Cuff);         // glove cuff
-        var shine = new Rectangle { Width = 4, Height = 16, RadiusX = 2, RadiusY = 2, Fill = Frozen(Color.FromArgb(0x30, 0x5C, 0xE1, 0xFF)) };
-        Canvas.SetLeft(shine, -3); Canvas.SetTop(shine, 6);
+        // One merged silhouette so there are no inner outlines where the parts overlap.
+        Geometry body = R(-8, 0, 16, 54, 8);                                  // index finger
+        foreach (var part in new[]
+        {
+            R(-13, 34, 50, 40, 13),                                          // palm
+            R(8, 31, 10, 18, 5), R(18, 32, 10, 18, 5), R(28, 34, 9.5, 16, 4.75), // curled fingers (knuckles)
+            R(-23, 40, 15, 28, 7.5, -28),                                    // thumb
+        })
+            body = Geometry.Combine(body, part, GeometryCombineMode.Union, null);
+        c.Children.Add(new Path { Data = body, Fill = Glove, Stroke = Ink, StrokeThickness = 2.4, StrokeLineJoin = PenLineJoin.Round });
+
+        // creases: between the finger and the knuckles, between knuckles, and the thumb's edge
+        var creases = new StreamGeometry();
+        using (var g = creases.Open())
+        {
+            foreach (var x in new[] { 8.0, 18, 28 }) { g.BeginFigure(new Point(x, x == 8 ? 36 : 35), false, false); g.LineTo(new Point(x, 43), true, false); }
+            g.BeginFigure(new Point(-9, 49), false, false);
+            g.QuadraticBezierTo(new Point(-2, 60), new Point(8, 61), true, false);
+        }
+        c.Children.Add(new Path { Data = creases, Stroke = Ink, StrokeThickness = 1.8, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+
+        var cuff = new Rectangle { Width = 46, Height = 14, RadiusX = 4, RadiusY = 4, Fill = Cuff, Stroke = Ink, StrokeThickness = 2.4 };
+        Canvas.SetLeft(cuff, -10); Canvas.SetTop(cuff, 71);
+        c.Children.Add(cuff);
+
+        var shine = new Rectangle { Width = 4, Height = 18, RadiusX = 2, RadiusY = 2, Fill = Frozen(Color.FromArgb(0x38, 0x5C, 0xE1, 0xFF)) };
+        Canvas.SetLeft(shine, -3.5); Canvas.SetTop(shine, 6);
         c.Children.Add(shine);
         return c;
     }
