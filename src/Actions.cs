@@ -10,7 +10,10 @@ namespace Assist;
 /// Stops as soon as the user moves the mouse or presses Esc.
 static class ActionRunner
 {
-    public sealed record Result(bool Look, string? Stopped, List<string> Done);
+    /// Look: take a screenshot afterwards. Stopped: why it stopped early (the user interrupted, an error).
+    /// NeedsAim: actions that were held back because there was no up-to-date screenshot to aim them with (and why);
+    /// Computah then takes one and asks the agent to re-issue them.
+    public sealed record Result(bool Look, string? Stopped, List<string> Done, List<string>? HeldBack = null, string? HeldBackWhy = null);
 
     /// Plain-language description, for the approval card and the report back to the agent.
     public static string Describe(HintTag a) => (a.Get("type") ?? "").ToLowerInvariant() switch
@@ -45,14 +48,18 @@ static class ActionRunner
             await Task.Delay(150);
         }
 
-        foreach (var a in actions)
+        bool stale = map == null; // no screenshot yet, or the screen switched windows since
+        string staleWhy = "there was no current screenshot to aim with";
+        for (int ai = 0; ai < actions.Count; ai++)
         {
+            var a = actions[ai];
             if (Native.IsDown(0x1B)) return new(false, "you pressed Esc", done);
             if (Moved(expected)) return new(false, "you moved the mouse", done);
 
             var type = (a.Get("type") ?? "").ToLowerInvariant();
             if (type == "look") { look = true; continue; }
-            if (NeedsScreen(a) && map == null) return new(false, "no screenshot to aim with", done);
+            if (NeedsScreen(a) && stale)
+                return new(true, null, done, actions.Skip(ai).Where(x => (x.Get("type") ?? "") != "look").Select(Describe).ToList(), staleWhy);
 
             switch (type)
             {
@@ -108,6 +115,7 @@ static class ActionRunner
                     var err = focusPlayground == null ? "no playgrounds in this session" : await focusPlayground(a);
                     if (err != null) { done.Add($"(couldn't bring playground {a.Get("playground") ?? a.Get("title")} to the front: {err})"); continue; }
                     await Task.Delay(600); // let it come up and repaint before the next step or the screenshot
+                    stale = true; staleWhy = "a different window came to the front, so the old screenshot no longer matches";
                     break;
                 }
                 default:

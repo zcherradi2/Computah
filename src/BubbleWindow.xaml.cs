@@ -759,12 +759,12 @@ public partial class BubbleWindow : Window
             shot.IncludeClipboard = false;
             lastScreen = new ScreenMap(shot);
             lastTarget = shot.ForegroundHwnd;
-            var blocks = new List<object>(shot.ImageBlocks())
-            {
-                new { type = "text", text = shot.ContextText() + $"\n\n[Computah] I ran your actions: {doneText}. This is the screen now. " +
-                                                              "Continue with the next step, or tell the user you're done." },
-            };
-            Dispatch(blocks, "", "Computah: screen after actions");
+            var note = res.HeldBack is { Count: > 0 } held
+                ? $"[Computah] I ran: {doneText}. I did NOT run the rest ({string.Join("; ", held)}) because {res.HeldBackWhy}. " +
+                  "This is the screen now: look at it and re-issue those steps with coordinates from THIS screenshot."
+                : $"[Computah] I ran your actions: {doneText}. This is the screen now. Continue with the next step, or tell the user you're done.";
+            var blocks = new List<object>(shot.ImageBlocks()) { new { type = "text", text = shot.ContextText() + "\n\n" + note } };
+            Dispatch(blocks, "", res.HeldBack != null ? "Computah: fresh screen to aim with" : "Computah: screen after actions");
         }
         else
         {
