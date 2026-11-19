@@ -129,6 +129,7 @@ public sealed class HintOverlay : Window
         public required Func<Point, bool> Hit;   // cursor (in overlay DIPs) is on the target
         public DateTime Expires;
         public bool Leaving;
+        public Window? CloseButton;   // drawings: a small clickable × (the overlay itself lets clicks through)
     }
 
     readonly System.Drawing.Rectangle monitor;
@@ -183,12 +184,14 @@ public sealed class HintOverlay : Window
 
     void AddNow(HintTag tag, ScreenMap map)
     {
-        double seconds = Math.Clamp(double.IsNaN(tag.Num("seconds")) ? 10 : tag.Num("seconds"), 2, 30);
+        bool drawing = tag.Type is "draw" or "drawing" or "sketch" or "svg";
+        double seconds = Math.Clamp(double.IsNaN(tag.Num("seconds")) ? 10 : tag.Num("seconds"), 2, drawing ? 120 : 30);
         Item? item = tag.Type switch
         {
             "point" or "pointer" or "click" => PointAt(tag, map),
             "underline" or "line" => Underline(tag, map),
             "box" or "frame" or "highlight" or "rect" => Box(tag, map),
+            "draw" or "drawing" or "sketch" or "svg" => Draw(tag, map),
             _ => null,
         };
         if (item == null) return;
@@ -323,6 +326,113 @@ public sealed class HintOverlay : Window
         return new Item { Visual = root, Hit = c => hit.Contains(c) };
     }
 
+    /// A drawing from the agent: SVG path data (`d`, in a `viewbox`, default 0 0 100 100), drawn as a glowing line that
+    /// traces itself in. Placed in the x/y/w/h box (screenshot pixels) if given, else in the middle of the screen.
+    Item? Draw(HintTag t, ScreenMap map)
+    {
+        var d = t.Get("d") ?? t.Get("path") ?? t.Get("svg");
+        if (string.IsNullOrWhiteSpace(d)) return null;
+        Geometry src;
+        try { src = Geometry.Parse(d.Trim()); }
+        catch (Exception ex) { Paths.Log("draw: bad path: " + ex.Message); return null; }
+
+        // the drawing's own coordinate box
+        Rect view = src.Bounds;
+        if (t.Get("viewbox") is { } vb)
+        {
+            var n = vb.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                      .Select(s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : double.NaN).ToArray();
+            if (n.Length == 4 && n.All(v => !double.IsNaN(v)) && n[2] > 0 && n[3] > 0) view = new Rect(n[0], n[1], n[2], n[3]);
+        }
+        if (view.IsEmpty || view.Width <= 0 || view.Height <= 0) return null;
+
+        // where it goes on screen
+        double sw = monitor.Width / dpi, sh = monitor.Height / dpi;
+        Rect box;
+        double x = t.Num("x"), y = t.Num("y"), w = t.Num("w"), h = t.Num("h");
+        if (!double.IsNaN(x) && !double.IsNaN(y) && !double.IsNaN(w) && !double.IsNaN(h) && w > 0 && h > 0)
+            box = new Rect(Local(x, y, t.Image, map), Local(x + w, y + h, t.Image, map));
+        else
+        {
+            double size = Math.Min(sw, sh) * 0.5;
+            box = new Rect((sw - size) / 2, (sh - size) / 2 - sh * 0.04, size, size);
+        }
+        double scale = Math.Min(box.Width / view.Width, box.Height / view.Height);
+        double ox = box.X + (box.Width - view.Width * scale) / 2 - view.X * scale;
+        double oy = box.Y + (box.Height - view.Height * scale) / 2 - view.Y * scale;
+        var geo = src.Clone();
+        geo.Transform = new MatrixTransform(scale, 0, 0, scale, ox, oy);
+
+        var color = Glow;
+        if (t.Get("color") is { Length: > 0 } cs)
+            try { color = (Color)ColorConverter.ConvertFromString(cs.Trim()); } catch { }
+        var brush = Frozen(color);
+        double thick = Math.Clamp(double.IsNaN(t.Num("stroke")) ? 4 : t.Num("stroke"), 1, 20);
+
+        // total line length, for the trace-in animation
+        double length = 0;
+        foreach (var fig in geo.GetFlattenedPathGeometry().Figures)
+        {
+            var prev = fig.StartPoint;
+            foreach (var seg in fig.Segments)
+            {
+                IEnumerable<Point> pts = seg switch
+                {
+                    PolyLineSegment pl => pl.Points,
+                    LineSegment ls => new[] { ls.Point },
+                    _ => Array.Empty<Point>(),
+                };
+                foreach (var p in pts) { length += (p - prev).Length; prev = p; }
+            }
+            if (fig.IsClosed) length += (fig.StartPoint - prev).Length;
+        }
+        double units = Math.Max(1, length / thick);
+        var drawTime = TimeSpan.FromMilliseconds(Math.Clamp(length * 1.6, 700, 3200));
+
+        var root = new Canvas();
+        if (t.Get("fill") is { Length: > 0 } fs && fs.Trim().ToLowerInvariant() != "none")
+        {
+            Color fc = color;
+            try { fc = (Color)ColorConverter.ConvertFromString(fs.Trim()); } catch { }
+            var fill = new Path { Data = geo, Fill = Frozen(Color.FromArgb(0x55, fc.R, fc.G, fc.B)), Opacity = 0 };
+            fill.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(500)) { BeginTime = drawTime });
+            root.Children.Add(fill);
+        }
+        var glow = new Path
+        {
+            Data = geo, Stroke = brush, StrokeThickness = thick * 3, Opacity = 0.3, StrokeLineJoin = PenLineJoin.Round,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Effect = new BlurEffect { Radius = thick * 3 },
+        };
+        var core = new Path
+        {
+            Data = geo, Stroke = brush, StrokeThickness = thick, StrokeLineJoin = PenLineJoin.Round,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            StrokeDashArray = new DoubleCollection { units, units }, StrokeDashOffset = units,
+            Effect = new DropShadowEffect { Color = color, BlurRadius = thick * 3, ShadowDepth = 0, Opacity = 0.9 },
+        };
+        core.BeginAnimation(Shape.StrokeDashOffsetProperty, new DoubleAnimation(units, 0, drawTime) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } });
+        // the glow follows once the line is drawn, then breathes
+        glow.Opacity = 0;
+        glow.BeginAnimation(OpacityProperty, new DoubleAnimation(0.15, 0.4, TimeSpan.FromMilliseconds(1100))
+        { BeginTime = drawTime, AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+        root.Children.Add(glow);
+        root.Children.Add(core);
+
+        if (t.Label != null)
+        {
+            var label = MakeLabel(t.Label);
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var b = geo.Bounds;
+            Canvas.SetLeft(label, Math.Clamp(b.X + (b.Width - label.DesiredSize.Width) / 2, 4, Math.Max(4, sw - label.DesiredSize.Width - 4)));
+            Canvas.SetTop(label, Math.Clamp(b.Bottom + 14, 4, Math.Max(4, sh - label.DesiredSize.Height - 4)));
+            root.Children.Add(label);
+        }
+        var item = new Item { Visual = root, Hit = _ => false }; // stays until its time is up or the user closes it
+        var gb = geo.Bounds;
+        item.CloseButton = MakeCloseButton(new Point(Math.Min(gb.Right + 6, sw - 34), Math.Max(gb.Top - 30, 4)), () => { if (!item.Leaving) Leave(item); });
+        return item;
+    }
+
     /// A white cartoon glove pointing up, fingertip at (0,0).
     static Canvas MakeHand()
     {
@@ -391,9 +501,49 @@ public sealed class HintOverlay : Window
     void Leave(Item it)
     {
         it.Leaving = true;
+        try { it.CloseButton?.Close(); } catch { }
         var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(260));
         fade.Completed += (_, _) => { canvas.Children.Remove(it.Visual); items.Remove(it); };
         it.Visual.BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// A round × button in its own small clickable window, at a point of this overlay (DIPs).
+    Window MakeCloseButton(Point at, Action close)
+    {
+        const double size = 28;
+        var glyph = new TextBlock
+        {
+            Text = "\uE711", FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 11,
+            Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+        };
+        var dot = new Border
+        {
+            Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Child = glyph,
+            Background = Frozen(Color.FromArgb(0xE6, 0x1C, 0x1C, 0x21)), BorderBrush = GlowBrush, BorderThickness = new Thickness(1.2),
+            Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "Close the drawing",
+            Effect = new DropShadowEffect { Color = Glow, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.6 },
+        };
+        var w = new Window
+        {
+            WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Topmost = true,
+            ShowInTaskbar = false, ShowActivated = false, ResizeMode = ResizeMode.NoResize, Width = size + 8, Height = size + 8,
+            WindowStartupLocation = WindowStartupLocation.Manual, Left = -32000, Top = -32000,
+            Content = new Grid { Children = { dot } }, Opacity = 0,
+        };
+        dot.MouseEnter += (_, _) => dot.Background = Frozen(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x33));
+        dot.MouseLeave += (_, _) => dot.Background = Frozen(Color.FromArgb(0xE6, 0x1C, 0x1C, 0x21));
+        dot.MouseLeftButtonUp += (_, _) => close();
+        w.SourceInitialized += (_, _) =>
+        {
+            var hwnd = new WindowInteropHelper(w).Handle;
+            Native.MakeNoActivate(hwnd);
+            Native.SetWindowPos(hwnd, IntPtr.Zero, monitor.X + (int)Math.Round((at.X - 4) * dpi), monitor.Y + (int)Math.Round((at.Y - 4) * dpi), 0, 0,
+                                Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
+        };
+        w.Show();
+        w.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(250)) { BeginTime = TimeSpan.FromMilliseconds(400) });
+        Closed += (_, _) => { try { w.Close(); } catch { } }; // the overlay goes away: so does the button
+        return w;
     }
 
     static double DistToSegment(Point p, Point a, Point b)

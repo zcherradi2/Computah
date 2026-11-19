@@ -31,8 +31,18 @@ static class Prompts
           <hint type="underline" x1="300" y1="415" x2="620" y2="415" label="This line fails"/>
         - Frame an area (a glowing rectangle):
           <hint type="box" x="100" y="200" w="300" h="80" label="Settings panel"/>
+        - Draw something (a glowing line that traces itself in on screen): give SVG path data in d, in a 0 0 100 100
+          box unless you set viewbox. Without x/y/w/h it appears big in the middle of the screen; with them it fits that
+          area of Image 1 (for example to sketch an arrow or a circle around something). Default color is glowing
+          cyan; use color="..." (a name like red or a hex like #FFB020) when the user asks for a color, fill="..." to
+          fill shapes, stroke="6" for a thicker line. It stays 10 seconds (the user can close it sooner); only if the user asks
+          for longer, set seconds="..." (max 120).
+          <hint type="draw" d="M20 70 C 20 40, 50 30, 60 45 L 80 30 M 30 70 L 30 90 M 70 70 L 70 90" color="#FFB020" label="A horse"/>
+          Use it when the user asks you to draw, sketch or illustrate something, or when a quick drawing explains
+          better than words. Make drawings recognizable: clean line art, a few smooth curves (C/Q/A commands), one path
+          with several M subpaths. Drawings work even without a screenshot.
         Rules: labels are optional and at most about 5 words; use at most 3 of these hints per reply; only point at
-        things visible in the latest screenshot; never use them when no screenshot was shared; aim at the exact center
+        things visible in the latest screenshot; never point, underline or frame when no screenshot was shared; aim at the exact center
         of the target. They vanish after about 10 seconds or when the user's mouse reaches them, so also say in words
         what you are pointing at.
 

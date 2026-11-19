@@ -860,21 +860,30 @@ public partial class BubbleWindow : Window
             hints = hints.Except(peeks).ToList();
             if (hints.Count == 0) return;
         }
-        if (lastScreen == null) return; // no screenshot in this conversation: nothing to point at
-        if (overlay != null && (overlayTurn != hintTurn || !overlay.IsVisible || overlay.MonitorRect != lastScreen.Monitor))
+        // Without a screenshot there's nothing to point at, but drawings can still go in the middle of this screen.
+        var map = lastScreen;
+        if (map == null)
+        {
+            hints = hints.Where(h => h.Type is "draw" or "drawing" or "sketch" or "svg").ToList();
+            if (hints.Count == 0) return;
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            map = ScreenMap.Identity(hwnd != IntPtr.Zero ? WF.Screen.FromHandle(hwnd).Bounds : WF.Screen.FromPoint(WF.Cursor.Position).Bounds);
+        }
+        if (overlay != null && (overlayTurn != hintTurn || !overlay.IsVisible || overlay.MonitorRect != map.Monitor))
         {
             overlay.Close();
             overlay = null;
         }
         if (overlay == null)
         {
-            overlay = new HintOverlay(lastScreen.Monitor);
+            overlay = new HintOverlay(map.Monitor);
+
             var o = overlay;
             o.Closed += (_, _) => { if (overlay == o) overlay = null; };
             overlayTurn = hintTurn;
             o.Show();
         }
-        foreach (var h in hints.Take(5)) overlay.Add(h, lastScreen);
+        foreach (var h in hints.Take(5)) overlay.Add(h, map);
     }
 
     // ---------- conversation UI ----------
