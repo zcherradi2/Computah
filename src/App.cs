@@ -251,10 +251,12 @@ sealed class AssistHost : IDisposable
     }
 
     /// Files/folders dropped on the Computah button: share them with the target session (or a new one) and open it.
-    void ShareWithTarget(string[] paths)
+    /// `to`: a specific session (from the drag fan), null = the target. `newSession`: start a fresh one.
+    void ShareWithTarget(string[] paths, SessionRecord? to, bool newSession)
     {
         var settings = Settings.Load();
-        var rec = store.Focused;
+        var rec = newSession ? null : to ?? store.Focused;
+        if (rec != null && !store.Sessions.Contains(rec)) rec = null;
         var w = rec?.Window;
         if (w == null)
         {

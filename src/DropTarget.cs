@@ -1,11 +1,22 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Windows;
 using ComIDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 
 namespace Assist;
 
-/// A plain Windows (OLE) drop target for files. Used instead of WPF's drag-and-drop on the floating button,
-/// because WPF misses the first drag over a window that never takes focus.
+/// Callbacks for a file drag over a window. Points are physical screen pixels. Run on the UI thread.
+public sealed class DropHandlers
+{
+    public Action<Point>? Enter;
+    public Action<Point>? Over;
+    public Action? Leave;
+    public Action<string[], Point>? Drop;   // invoked after the drag has fully ended
+}
+
+/// A plain Windows (OLE) drop target for files, used instead of WPF's drag-and-drop on Computah's
+/// no-focus windows (the floating button and its session fan).
 [ComVisible(true)]
 public sealed class FileDropTarget : FileDropTarget.IOleDropTarget
 {
@@ -25,16 +36,15 @@ public sealed class FileDropTarget : FileDropTarget.IOleDropTarget
 
     const int DROPEFFECT_NONE = 0, DROPEFFECT_COPY = 1;
 
-    readonly Action<bool> hover;          // true on enter, false on leave/drop
-    readonly Action<string[]> dropped;
+    readonly DropHandlers h;
     bool hasFiles;
 
-    FileDropTarget(Action<bool> hover, Action<string[]> dropped) { this.hover = hover; this.dropped = dropped; }
+    FileDropTarget(DropHandlers h) { this.h = h; }
 
     /// Replace whatever drop target the window had with this one.
-    public static FileDropTarget Register(IntPtr hwnd, Action<bool> hover, Action<string[]> dropped)
+    public static FileDropTarget Register(IntPtr hwnd, DropHandlers handlers)
     {
-        var t = new FileDropTarget(hover, dropped);
+        var t = new FileDropTarget(handlers);
         RevokeDragDrop(hwnd);
         int hr = RegisterDragDrop(hwnd, t);
         if (hr != 0) Paths.Log($"RegisterDragDrop failed: 0x{hr:X}");
@@ -49,11 +59,11 @@ public sealed class FileDropTarget : FileDropTarget.IOleDropTarget
     {
         try
         {
-            var d = new System.Windows.DataObject(data);
-            if (d.GetDataPresent(System.Windows.DataFormats.FileDrop) && d.GetData(System.Windows.DataFormats.FileDrop) is string[] { Length: > 0 } list)
+            var d = new DataObject(data);
+            if (d.GetDataPresent(DataFormats.FileDrop) && d.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } list)
                 return list;
 
-            foreach (var fmt in new[] { "UniformResourceLocatorW", "text/uri-list", System.Windows.DataFormats.UnicodeText, System.Windows.DataFormats.Text })
+            foreach (var fmt in new[] { "UniformResourceLocatorW", "text/uri-list", DataFormats.UnicodeText, DataFormats.Text })
             {
                 if (!d.GetDataPresent(fmt)) continue;
                 var raw = d.GetData(fmt) switch
@@ -63,7 +73,7 @@ public sealed class FileDropTarget : FileDropTarget.IOleDropTarget
                     _ => null,
                 };
                 if (raw == null) continue;
-                var paths = new System.Collections.Generic.List<string>();
+                var paths = new List<string>();
                 foreach (var line in raw.Split(new[] { '\r', '\n', '\0' }, StringSplitOptions.RemoveEmptyEntries))
                 {
                     var p = line.Trim().Trim('"');
@@ -77,23 +87,26 @@ public sealed class FileDropTarget : FileDropTarget.IOleDropTarget
         catch { return null; }
     }
 
+    static Point P(POINTL pt) => new(pt.X, pt.Y);
+
     public int DragEnter(ComIDataObject data, int keys, POINTL pt, ref int effect)
     {
         hasFiles = Files(data) is { Length: > 0 };
         effect = hasFiles ? DROPEFFECT_COPY : DROPEFFECT_NONE;
-        if (hasFiles) hover(true);
+        if (hasFiles) h.Enter?.Invoke(P(pt));
         return 0;
     }
 
     public int DragOver(int keys, POINTL pt, ref int effect)
     {
         effect = hasFiles ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        if (hasFiles) h.Over?.Invoke(P(pt));
         return 0;
     }
 
     public int DragLeave()
     {
-        if (hasFiles) hover(false);
+        if (hasFiles) h.Leave?.Invoke();
         hasFiles = false;
         return 0;
     }
@@ -101,11 +114,12 @@ public sealed class FileDropTarget : FileDropTarget.IOleDropTarget
     public int Drop(ComIDataObject data, int keys, POINTL pt, ref int effect)
     {
         var files = Files(data);
-        hover(false);
         hasFiles = false;
         effect = files is { Length: > 0 } ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        var at = P(pt);
+        h.Leave?.Invoke();
         // Act after the drag has fully ended, so opening the bubble doesn't happen inside the drop call.
-        if (files is { Length: > 0 }) System.Windows.Application.Current.Dispatcher.BeginInvoke(() => dropped(files));
+        if (files is { Length: > 0 }) Application.Current.Dispatcher.BeginInvoke(() => h.Drop?.Invoke(files, at));
         return 0;
     }
 }

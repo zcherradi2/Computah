@@ -19,7 +19,11 @@ public partial class DockWindow : Window
     bool pulsing;
 
     public event Action? Clicked;
-    public event Action<string[]>? FilesDropped;
+    /// Files dropped: (paths, session to share with — null means the target —, start a new session instead).
+    public event Action<string[], SessionRecord?, bool>? FilesDropped;
+
+    DropFan? fan;
+    readonly System.Windows.Threading.DispatcherTimer fanHide = new() { Interval = TimeSpan.FromMilliseconds(380) };
 
     public DockWindow(SessionStore store)
     {
@@ -41,13 +45,41 @@ public partial class DockWindow : Window
         // Registered directly with Windows (see FileDropTarget): WPF's own drop handling misses the first drag here.
         Root.Background = Brushes.Transparent; // whole button area is part of the window
         SourceInitialized += (_, _) =>
-            dropTarget = FileDropTarget.Register(new WindowInteropHelper(this).Handle,
-                hover => Dispatcher.BeginInvoke(() => { Zoom(hover ? 1.18 : 1.0); DropGlow(hover); }),
-                files => FilesDropped?.Invoke(files));
-        Closed += (_, _) => FileDropTarget.Unregister(new WindowInteropHelper(this).Handle);
+            dropTarget = FileDropTarget.Register(new WindowInteropHelper(this).Handle, new DropHandlers
+            {
+                Enter = _ => { Zoom(1.18); DropGlow(true); ShowFan(); fan?.Highlight(fan.TargetZone); },
+                Leave = () => { Zoom(1.0); DropGlow(false); fan?.Highlight(null); fanHide.Start(); },
+                Drop = (files, _) => { HideFan(); FilesDropped?.Invoke(files, null, false); },
+            });
+        Closed += (_, _) => { FileDropTarget.Unregister(new WindowInteropHelper(this).Handle); HideFan(); };
+        fanHide.Tick += (_, _) => HideFan();
     }
 
     FileDropTarget? dropTarget; // kept alive while registered
+
+    /// Session tags above the button while files are dragged over it.
+    void ShowFan()
+    {
+        fanHide.Stop();
+        if (fan != null) return;
+        fan = new DropFan(this, store);
+        fan.DragEntered += () => fanHide.Stop();
+        fan.DragLeft += () => fanHide.Start();
+        fan.Dropped += (files, zone) =>
+        {
+            HideFan();
+            FilesDropped?.Invoke(files, zone.IsNew ? null : zone.Record, zone.IsNew);
+        };
+        fan.Show();
+    }
+
+    void HideFan()
+    {
+        fanHide.Stop();
+        var f = fan;
+        fan = null;
+        f?.Close();
+    }
 
     void DropGlow(bool on)
     {
