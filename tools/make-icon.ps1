@@ -44,8 +44,8 @@ function Draw-Face([int]$s) {
     }
 
     $eye = [System.Drawing.Color]::FromArgb(255, 92, 225, 255)
-    $ew = [single]($s * 0.14); $eh = [single]($h * 0.30)
-    $ey = [single]($top + $h * 0.24)
+    $ew = [single]($s * 0.165); $eh = [single]($h * 0.42)
+    $ey = [single]($top + ($h - $eh) / 2)          # vertically centred on the screen
     foreach ($cx in @([single]($s * 0.34), [single]($s * 0.66))) {
         # glow: radial falloff behind each eye
         if ($s -ge 24) {
@@ -64,14 +64,6 @@ function Draw-Face([int]$s) {
             $cp = New-RoundRect ($cx - $ew * 0.22) ($ey + $eh * 0.14) ($ew * 0.44) ($eh * 0.5) ($ew * 0.22)
             $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(200, 225, 250, 255))), $cp)
         }
-    }
-
-    # small smile
-    if ($s -ge 24) {
-        $sw = [single]($s * 0.18); $sh = [single]($h * 0.11)
-        $sp = New-Object System.Drawing.Pen $eye, ([single]($s * 0.042))
-        $sp.StartCap = 'Round'; $sp.EndCap = 'Round'
-        $g.DrawArc($sp, [single]($s / 2 - $sw / 2), [single]($top + $h * 0.62), $sw, $sh, 20, 140)
     }
 
     $g.Dispose()
