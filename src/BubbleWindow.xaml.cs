@@ -29,7 +29,7 @@ public partial class BubbleWindow : Window
     static readonly Brush AccentBrush = Frozen(Color.FromRgb(0xD9, 0x77, 0x57));
     static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
-    sealed record Attachment(string Kind, string Label, FrameworkElement Chip);
+    sealed record Attachment(string Kind, string Label, FrameworkElement Chip, string? Image = null);
 
     readonly Settings settings;
     readonly AgentInfo agent;
@@ -205,7 +205,7 @@ public partial class BubbleWindow : Window
     };
 
     void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip,
-                       string? glyph = null, string? text = null, int? at = null, string? open = null)
+                       string? glyph = null, string? text = null, int? at = null, string? open = null, string? image = null)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         if (visual != null) sp.Children.Add(visual);
@@ -227,7 +227,7 @@ public partial class BubbleWindow : Window
         if (!string.IsNullOrEmpty(tip)) chip.ToolTip = tip;
         if (open != null) chip.MouseLeftButtonUp += (_, e) => { if (!e.Handled) Open(open); };
 
-        var a = new Attachment(kind, label, chip);
+        var a = new Attachment(kind, label, chip, image);
         x.MouseLeftButtonUp += (_, e) => { e.Handled = true; RemoveAttachment(a); };
         int i = Math.Clamp(at ?? attachments.Count, 0, attachments.Count);
         attachments.Insert(i, a);
@@ -244,7 +244,7 @@ public partial class BubbleWindow : Window
 
     void UpdatePlaceholder()
     {
-        if (pendingCtx != null && attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
+        if (attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
         else if (HasConversation) Placeholder.Text = "Ask a follow-up…";
         else Placeholder.Text = $"Ask {agent.Name}…";
         Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -257,7 +257,7 @@ public partial class BubbleWindow : Window
         text = text.Trim();
         if (streaming || closed) return;
         var ctx = pendingCtx;
-        if (text.Length == 0 && !(ctx != null && attachments.Count > 0)) return;
+        if (text.Length == 0 && attachments.Count == 0) return;
 
         if (session == null)
         {
@@ -266,8 +266,12 @@ public partial class BubbleWindow : Window
         }
 
         var blocks = new List<object>();
-        string body = text.Length > 0 ? text : settings.Instruction;
-        string? attachLine = null;
+        string body = text.Length > 0 ? text
+                    : ctx != null ? settings.Instruction
+                    : "Look at the pasted image(s) and help with what I most likely need. Be concise.";
+        string? attachLine = attachments.Count > 0 ? string.Join(" · ", attachments.Select(a => a.Label)) : null;
+        var pastedImages = attachments.Where(a => a.Image != null).Select(a => a.Image!).ToList();
+
         if (ctx != null)
         {
             ctx.IncludeScreen = attachments.Any(a => a.Kind == "screen");
@@ -275,13 +279,16 @@ public partial class BubbleWindow : Window
             ctx.IncludeClipboard = attachments.Any(a => a.Kind == "clipboard");
             blocks.AddRange(ctx.ImageBlocks());
             body = ctx.ContextText() + "\n\n" + body;
-            attachLine = attachments.Count > 0 ? string.Join(" · ", attachments.Select(a => a.Label)) : null;
-
             pendingCtx = null;
-            attachments.Clear();
-            Attachments.Children.Clear();
-            Attachments.Visibility = Visibility.Collapsed;
         }
+        if (pastedImages.Count > 0)
+        {
+            blocks.AddRange(pastedImages.Select(Img.Block));
+            body = $"[The user pasted {pastedImages.Count} image(s); they are the last image(s) attached to this message.]\n\n" + body;
+        }
+        attachments.Clear();
+        Attachments.Children.Clear();
+        Attachments.Visibility = Visibility.Collapsed;
         blocks.Add(new { type = "text", text = body });
 
         Expand();
@@ -481,13 +488,41 @@ public partial class BubbleWindow : Window
             e.Handled = true;
             RemoveAttachment(attachments[^1]);
         }
+        else if (e.Key == Key.V && (Keyboard.Modifiers & ModifierKeys.Control) != 0 && TryPasteImage())
+        {
+            e.Handled = true;
+        }
+    }
+
+    /// Ctrl+V with an image on the clipboard: attach it as a tag (text pastes normally into the input).
+    bool TryPasteImage()
+    {
+        try
+        {
+            if (WF.Clipboard.ContainsText() || !WF.Clipboard.ContainsImage()) return false;
+            using var img = WF.Clipboard.GetImage();
+            if (img == null) return false;
+            var jpeg = Img.ScaledJpeg(img, 1568, 1_250_000).b64;
+            var thumb = new Border
+            {
+                Width = 34, Height = 22, CornerRadius = new CornerRadius(4),
+                Background = new ImageBrush(Thumbnail(jpeg)) { Stretch = Stretch.UniformToFill },
+                BorderBrush = Frozen(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            AddAttachment("pasted", "Pasted image", thumb, $"{img.Width}×{img.Height} image from the clipboard", image: jpeg);
+            Attachments.Visibility = Visibility.Visible;
+            UpdatePlaceholder();
+            return true;
+        }
+        catch (Exception ex) { Paths.Log("paste image: " + ex.Message); return false; }
     }
 
     void SendFromInput()
     {
         if (streaming) return;
         var text = Input.Text;
-        if (text.Trim().Length == 0 && (pendingCtx == null || attachments.Count == 0)) return;
+        if (text.Trim().Length == 0 && attachments.Count == 0) return;
         Input.Clear();
         Send(text);
     }

@@ -149,7 +149,7 @@ static class ContextCapture
 
         // 2) Clipboard as it was before we touch anything.
         c.ForegroundHwnd = fg;
-        ReadClipboard(c);
+        if (s.AttachClipboard) ReadClipboard(c);
 
         await encoded.Task;
         return c;
