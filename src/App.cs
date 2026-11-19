@@ -108,13 +108,12 @@ sealed class AssistHost : IDisposable
     /// First press captures the screen into a compact input; pressing the same hotkey again sends it as is.
     /// Alt+A starts a new session. Ctrl+Alt+A adds to the target session (picked in the sessions panel, or
     /// the last one used), reopening its bubble with history if it was closed.
-    /// `explicitTarget` is set when a session is opened from the panel (no selection grab then).
-    async void Trigger(int hotkey, SessionRecord? explicitTarget = null)
+    async void Trigger(int hotkey)
     {
         // Double tap = A pressed again while the modifiers stayed held → send what's pending.
         // Pressing the whole chord again after letting go → re-capture (handled below).
-        bool doubleTap = explicitTarget == null && chordHeld && chordHotkey == hotkey;
-        if (explicitTarget == null) WatchChord(hotkey);
+        bool doubleTap = chordHeld && chordHotkey == hotkey;
+        WatchChord(hotkey);
 
         var focusedWin = store.Focused?.Window;
         if (doubleTap)
@@ -136,7 +135,7 @@ sealed class AssistHost : IDisposable
         {
             // The session this capture goes to. Alt+A pressed again while its popup is still unsent
             // re-captures into that same popup instead of opening another one.
-            SessionRecord? rec = hotkey == HotkeyContinue ? explicitTarget ?? store.Focused
+            SessionRecord? rec = hotkey == HotkeyContinue ? store.Focused
                                : focusedWin != null && focusedWin.CanSendAsIs(hotkey) ? store.Focused : null;
 
             // Hide its popup so it isn't in the new screenshot.
@@ -160,7 +159,7 @@ sealed class AssistHost : IDisposable
 
             w.AttachContext(ctx, hotkey);
             if (!w.IsVisible) w.Show();
-            if (explicitTarget == null) await ContextCapture.GrabSelectionAsync(ctx, settings);
+            await ContextCapture.GrabSelectionAsync(ctx, settings);
             // A double tap can land at any point while we were busy: check only now, after the new
             // context is attached, so nothing resets it. It sends as soon as the bubble is ready.
             if (sendQueued) w.SendAsIs();
@@ -217,6 +216,25 @@ sealed class AssistHost : IDisposable
 
     // ---------- sessions ----------
 
+    /// From the sessions panel: show the conversation as it is, next to the mouse, without capturing anything.
+    void OpenSession(SessionRecord rec)
+    {
+        var w = rec.Window;
+        if (w == null)
+        {
+            var agent = Agents.ById(rec.AgentId);
+            if (agent == null)
+            {
+                tray.ShowBalloonTip(3000, "Computah", $"{Agents.NameOf(rec.AgentId)} isn't installed any more.", WF.ToolTipIcon.Warning);
+                return;
+            }
+            w = OpenBubble(rec, agent, Settings.Load());
+        }
+        SetFocused(rec);
+        Native.GetCursorPos(out var pt);
+        w.ShowFocused(pt.X, pt.Y);
+    }
+
     void SetFocused(SessionRecord rec)
     {
         if (!store.Sessions.Contains(rec)) store.Sessions.Add(rec);
@@ -254,11 +272,10 @@ sealed class AssistHost : IDisposable
         if (dock == null) SetDockVisible(true); // the panel is anchored to the button
         panel = new SessionsPanel(store, dock!);
         panel.FocusRequested += SetFocused;
-        panel.OpenRequested += async rec =>
+        panel.OpenRequested += rec =>
         {
             panel?.SafeClose();
-            await Task.Delay(160); // let the panel disappear before the screenshot
-            Trigger(HotkeyContinue, rec);
+            OpenSession(rec);
         };
         panel.DeleteRequested += rec =>
         {

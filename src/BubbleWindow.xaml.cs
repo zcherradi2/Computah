@@ -153,6 +153,24 @@ public partial class BubbleWindow : Window
         if (IsLoaded && !userMoved) PlaceNearCursor();
     }
 
+    /// Open (or bring back) this conversation next to a screen point, focused and ready to type. No capture.
+    public void ShowFocused(int x, int y)
+    {
+        if (!IsVisible || !userMoved)
+        {
+            anchorX = x; anchorY = y;
+            var wa = WF.Screen.FromPoint(new System.Drawing.Point(x, y)).WorkingArea;
+            anchorBelow = y < wa.Top + wa.Height * 0.55;
+        }
+        UpdatePlaceholder();
+        if (!IsVisible) Show();
+        else if (!userMoved) PlaceNearCursor();
+        Native.ForceForeground(new WindowInteropHelper(this).Handle);
+        Activate();
+        Input.Focus();
+        Scroller.ScrollToEnd();
+    }
+
     /// Pressing the same hotkey again while its capture is still unsent means "send it".
     public bool CanSendAsIs(int hotkey) => !closed && pendingCtx != null && pendingHotkey == hotkey;
 
