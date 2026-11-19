@@ -17,7 +17,7 @@ public sealed class CapturedContext
     public DateTime Time;
     public int CursorX, CursorY;                 // physical screen pixels
     public Rectangle Monitor;
-    public string WindowTitle = "", ProcessName = "";
+    public string WindowTitle = "", ProcessName = "", ProcessPath = "";
     public int ProcessId;
 
     public string ScreenshotPath = "";
@@ -27,11 +27,20 @@ public sealed class CapturedContext
     public string? SelectedText, ClipboardText, ClipboardImageJpeg;
     public List<string> ClipboardFiles = new();
 
+    // The user can remove attachments before sending.
+    public bool IncludeScreen = true, IncludeSelection = true, IncludeClipboard = true;
+
+    public bool HasClipboard => ClipboardText != null || ClipboardImageJpeg != null || ClipboardFiles.Count > 0;
+
     public List<object> ImageBlocks()
     {
-        var list = new List<object> { Img.Block(FullJpeg) };
-        if (CropJpeg != null) list.Add(Img.Block(CropJpeg));
-        if (ClipboardImageJpeg != null) list.Add(Img.Block(ClipboardImageJpeg));
+        var list = new List<object>();
+        if (IncludeScreen)
+        {
+            list.Add(Img.Block(FullJpeg));
+            if (CropJpeg != null) list.Add(Img.Block(CropJpeg));
+        }
+        if (IncludeClipboard && ClipboardImageJpeg != null) list.Add(Img.Block(ClipboardImageJpeg));
         return list;
     }
 
@@ -40,24 +49,35 @@ public sealed class CapturedContext
         var sb = new StringBuilder();
         int n = 1;
         sb.AppendLine($"[Desktop context captured with Ctrl+Alt+A at {Time:yyyy-MM-dd HH:mm:ss}]");
-        sb.AppendLine($"Active window: \"{WindowTitle}\" (process: {ProcessName})");
-        sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor.");
-        sb.AppendLine($"Image {n++}: the whole monitor scaled to {FullW}x{FullH}; pointer at ({FullCursorX}, {FullCursorY}), marked with a red circle.");
-        if (CropJpeg != null)
-            sb.AppendLine($"Image {n++}: full-resolution {CropW}x{CropH} crop around the pointer; pointer at ({CropCursorX}, {CropCursorY}), red circle.");
-        sb.AppendLine($"Full-resolution screenshot file: {ScreenshotPath}");
+        sb.AppendLine("Focused app at capture time:");
+        sb.AppendLine($"  Id: {ProcessId}");
+        sb.AppendLine($"  ProcessName: {ProcessName}");
+        sb.AppendLine($"  WindowTitle: {WindowTitle}");
+        sb.AppendLine($"  Path: {(ProcessPath.Length > 0 ? ProcessPath : "unknown")}");
+        if (IncludeScreen)
+        {
+            sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor.");
+            sb.AppendLine($"Image {n++}: the whole monitor scaled to {FullW}x{FullH}; pointer at ({FullCursorX}, {FullCursorY}), marked with a red circle.");
+            if (CropJpeg != null)
+                sb.AppendLine($"Image {n++}: full-resolution {CropW}x{CropH} crop around the pointer; pointer at ({CropCursorX}, {CropCursorY}), red circle.");
+            sb.AppendLine($"Full-resolution screenshot file: {ScreenshotPath}");
+        }
 
-        bool sameAsClip = SelectedText != null && SelectedText == ClipboardText;
-        if (SelectedText != null)
+        bool sel = IncludeSelection && SelectedText != null;
+        bool clip = IncludeClipboard;
+        bool sameAsClip = sel && clip && SelectedText == ClipboardText;
+        if (sel)
             sb.AppendLine("Selected text (grabbed with Ctrl+C; some editors copy the current line when nothing is selected):")
-              .AppendLine("<<<").AppendLine(Trunc(SelectedText)).AppendLine(">>>");
-        else sb.AppendLine("Selected text: none detected.");
+              .AppendLine("<<<").AppendLine(Trunc(SelectedText!)).AppendLine(">>>");
 
-        if (ClipboardText != null && !sameAsClip)
-            sb.AppendLine("Clipboard text:").AppendLine("<<<").AppendLine(Trunc(ClipboardText)).AppendLine(">>>");
-        else if (sameAsClip) sb.AppendLine("Clipboard text: same as the selected text.");
-        if (ClipboardImageJpeg != null) sb.AppendLine($"Clipboard image: attached as Image {n++}.");
-        if (ClipboardFiles.Count > 0) sb.AppendLine("Clipboard files: " + string.Join(", ", ClipboardFiles.Take(30)));
+        if (clip)
+        {
+            if (sameAsClip) sb.AppendLine("Clipboard text: same as the selected text.");
+            else if (ClipboardText != null)
+                sb.AppendLine("Clipboard text:").AppendLine("<<<").AppendLine(Trunc(ClipboardText)).AppendLine(">>>");
+            if (ClipboardImageJpeg != null) sb.AppendLine($"Clipboard image: attached as Image {n++}.");
+            if (ClipboardFiles.Count > 0) sb.AppendLine("Clipboard files: " + string.Join(", ", ClipboardFiles.Take(30)));
+        }
         return sb.ToString().TrimEnd();
     }
 
@@ -83,6 +103,7 @@ static class ContextCapture
         Native.GetWindowThreadProcessId(fg, out uint pid);
         c.ProcessId = (int)pid;
         try { c.ProcessName = Process.GetProcessById((int)pid).ProcessName; } catch { c.ProcessName = "unknown"; }
+        try { c.ProcessPath = Native.ProcessPath(pid) ?? ""; } catch { }
 
         // 1) Screenshot of the monitor under the pointer (grabbed first, before anything changes).
         var screen = WF.Screen.FromPoint(new Point(pt.X, pt.Y));

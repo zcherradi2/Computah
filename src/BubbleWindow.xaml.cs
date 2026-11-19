@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -9,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using WF = System.Windows.Forms;
 
 namespace Assist;
@@ -18,15 +21,18 @@ public partial class BubbleWindow : Window
     static readonly Brush Fg = Frozen(Color.FromRgb(0xEC, 0xEC, 0xEE));
     static readonly Brush Muted = Frozen(Color.FromRgb(0x8C, 0x8C, 0x96));
     static readonly Brush ErrorFg = Frozen(Color.FromRgb(0xFF, 0x8A, 0x80));
-    static readonly Brush ChipBg = Frozen(Color.FromArgb(0x1E, 0xFF, 0xFF, 0xFF));
+    static readonly Brush ChipBg = Frozen(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF));
     static readonly Brush UserBg = Frozen(Color.FromArgb(0x38, 0xD9, 0x77, 0x57));
     static readonly Brush AccentBrush = Frozen(Color.FromRgb(0xD9, 0x77, 0x57));
     static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
+    sealed record Attachment(string Kind, string Label, FrameworkElement Chip);
+
     readonly CapturedContext ctx;
     readonly Settings settings;
-    readonly bool autoSend;
+    readonly bool sendNow;
     readonly bool anchorBelow;
+    readonly List<Attachment> attachments = new();
 
     ClaudeSession? session;
     bool contextSent, streaming, userMoved, turnDonePending, closed;
@@ -35,18 +41,18 @@ public partial class BubbleWindow : Window
     readonly StringBuilder pending = new();
     readonly object gate = new();
 
-    public BubbleWindow(CapturedContext ctx, Settings settings, bool autoSend)
+    public BubbleWindow(CapturedContext ctx, Settings settings, bool sendNow)
     {
         this.ctx = ctx;
         this.settings = settings;
-        this.autoSend = autoSend;
+        this.sendNow = sendNow;
         InitializeComponent();
 
         var wa = WF.Screen.FromPoint(new System.Drawing.Point(ctx.CursorX, ctx.CursorY)).WorkingArea;
         anchorBelow = ctx.CursorY < wa.Top + wa.Height * 0.55;
-        Placeholder.Text = autoSend ? "Ask a follow-up…" : "Ask about your screen…";
 
-        BuildChips();
+        BuildAttachments();
+        UpdatePlaceholder();
         SourceInitialized += (_, _) => PlaceNearCursor();
         SizeChanged += (_, _) => { if (!userMoved) PlaceNearCursor(); };
         Loaded += OnLoaded;
@@ -54,9 +60,9 @@ public partial class BubbleWindow : Window
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Close(); } };
         CompositionTarget.Rendering += OnFrame;
 
-        // Start claude right away so it is warm by the time we send.
+        // Start claude right away so it is warm by the time the user hits Enter.
         try { StartSession(); }
-        catch (Exception ex) { AddError("Couldn't start Claude Code: " + ex.Message); }
+        catch (Exception ex) { Expand(); AddError("Couldn't start Claude Code: " + ex.Message); }
     }
 
     // ---------- lifecycle ----------
@@ -65,15 +71,15 @@ public partial class BubbleWindow : Window
     {
         PlaceNearCursor();
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+        BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
         Slide.BeginAnimation(TranslateTransform.YProperty,
-            new DoubleAnimation(anchorBelow ? -8 : 8, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+            new DoubleAnimation(anchorBelow ? -6 : 6, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
 
         Native.ForceForeground(new WindowInteropHelper(this).Handle);
         Activate();
         Input.Focus();
 
-        if (autoSend) Send(settings.Instruction, showBubble: false);
+        if (sendNow) Send("");
     }
 
     void OnClosed(object? sender, EventArgs e)
@@ -95,31 +101,119 @@ public partial class BubbleWindow : Window
         });
     }
 
+    // ---------- attachments ----------
+
+    void BuildAttachments()
+    {
+        AddAttachment("screen", "Screen", ScreenChip(), $"Screenshot + mouse position\n{ctx.ScreenshotPath}");
+        if (ctx.SelectedText != null)
+            AddAttachment("selection", "Selection", null, Preview(ctx.SelectedText), "", "Selection");
+        if (ctx.HasClipboard)
+        {
+            string label = ctx.ClipboardText != null ? "Clipboard"
+                         : ctx.ClipboardImageJpeg != null ? "Clipboard image" : $"{ctx.ClipboardFiles.Count} file(s)";
+            string tip = ctx.ClipboardText != null ? Preview(ctx.ClipboardText) : string.Join("\n", ctx.ClipboardFiles);
+            AddAttachment("clipboard", label, null, tip, "", label);
+        }
+    }
+
+    FrameworkElement ScreenChip()
+    {
+        var thumb = new Border
+        {
+            Width = 34, Height = 22, CornerRadius = new CornerRadius(4),
+            Background = new ImageBrush(Thumbnail(ctx.FullJpeg)) { Stretch = Stretch.UniformToFill },
+            BorderBrush = Frozen(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        return thumb;
+    }
+
+    void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip, string? glyph = null, string? text = null)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        if (visual != null) sp.Children.Add(visual);
+        else sp.Children.Add(new TextBlock { Text = glyph, FontFamily = Icons, FontSize = 12, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 0, 0, 0) });
+        sp.Children.Add(new TextBlock { Text = text ?? label, FontSize = 12, Foreground = Fg, Margin = new Thickness(6, 0, 0, 1), VerticalAlignment = VerticalAlignment.Center });
+
+        var x = new TextBlock
+        {
+            Text = "", FontFamily = Icons, FontSize = 9, Foreground = Muted, Margin = new Thickness(7, 0, 1, 0),
+            VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand, ToolTip = "Remove (Backspace)",
+        };
+        sp.Children.Add(x);
+
+        var chip = new Border
+        {
+            Child = sp, CornerRadius = new CornerRadius(8), Background = ChipBg,
+            Padding = new Thickness(3, 3, 6, 3), Margin = new Thickness(0, 0, 4, 0), Height = 30,
+        };
+        if (!string.IsNullOrEmpty(tip)) chip.ToolTip = tip;
+        if (kind == "screen") { thumbOpen(chip); }
+
+        var a = new Attachment(kind, label, chip);
+        x.MouseLeftButtonUp += (_, e) => { e.Handled = true; RemoveAttachment(a); };
+        attachments.Add(a);
+        Attachments.Children.Add(chip);
+
+        void thumbOpen(Border b) => b.MouseLeftButtonUp += (_, e) => { if (!e.Handled) Open(ctx.ScreenshotPath); };
+    }
+
+    void RemoveAttachment(Attachment a)
+    {
+        attachments.Remove(a);
+        Attachments.Children.Remove(a.Chip);
+        UpdatePlaceholder();
+        Input.Focus();
+    }
+
+    void UpdatePlaceholder()
+    {
+        if (contextSent) Placeholder.Text = "Ask a follow-up…";
+        else if (attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
+        else Placeholder.Text = "Ask Claude…";
+        Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     // ---------- sending ----------
 
-    void Send(string text, bool showBubble)
+    void Send(string text)
     {
-        if (streaming || closed || string.IsNullOrWhiteSpace(text)) return;
+        text = text.Trim();
+        if (streaming || closed) return;
+        bool firstTurn = !contextSent;
+        if (text.Length == 0 && !(firstTurn && attachments.Count > 0)) return;
+
         if (session == null)
         {
             try { StartSession(); }
-            catch (Exception ex) { AddError("Couldn't start Claude Code: " + ex.Message); return; }
+            catch (Exception ex) { Expand(); AddError("Couldn't start Claude Code: " + ex.Message); return; }
         }
 
         var blocks = new List<object>();
-        string body = text.Trim();
-        if (!contextSent)
+        string body = text.Length > 0 ? text : settings.Instruction;
+        string? attachLine = null;
+        if (firstTurn)
         {
+            ctx.IncludeScreen = attachments.Any(a => a.Kind == "screen");
+            ctx.IncludeSelection = attachments.Any(a => a.Kind == "selection");
+            ctx.IncludeClipboard = attachments.Any(a => a.Kind == "clipboard");
             blocks.AddRange(ctx.ImageBlocks());
             body = ctx.ContextText() + "\n\n" + body;
+            attachLine = attachments.Count > 0 ? string.Join(" · ", attachments.Select(a => a.Label)) : null;
             contextSent = true;
+            attachments.Clear();
+            Attachments.Children.Clear();
+            Attachments.Visibility = Visibility.Collapsed;
         }
         blocks.Add(new { type = "text", text = body });
 
-        if (showBubble) AddUserBubble(text.Trim());
+        Expand();
+        AddUserBubble(text, attachLine);
         current = MakeText("", Fg);
         current.Margin = new Thickness(0, 4, 0, 8);
         Messages.Children.Add(current);
+        UpdatePlaceholder();
 
         SetStreaming(true);
         StatusText.Text = "Thinking…";
@@ -128,9 +222,16 @@ public partial class BubbleWindow : Window
         {
             SetStreaming(false);
             AddError("Lost connection to Claude: " + ex.Message);
-            session?.Dispose(); session = null; contextSent = false;
+            session?.Dispose(); session = null;
         }
         Scroller.ScrollToEnd();
+    }
+
+    void Expand()
+    {
+        Header.Visibility = Visibility.Visible;
+        Scroller.Visibility = Visibility.Visible;
+        Composer.Margin = new Thickness(10, 6, 10, 10);
     }
 
     void SetStreaming(bool on)
@@ -188,40 +289,27 @@ public partial class BubbleWindow : Window
         if (IsActive) Input.Focus();
     }
 
-    // ---------- UI building ----------
+    // ---------- conversation UI ----------
 
-    void BuildChips()
+    void AddUserBubble(string text, string? attachLine)
     {
-        AddChip("", "Screenshot", ctx.ScreenshotPath, () => Open(ctx.ScreenshotPath));
-        AddChip("", $"{ctx.CursorX - ctx.Monitor.X}, {ctx.CursorY - ctx.Monitor.Y}", "Mouse position", null);
-        if (!string.IsNullOrEmpty(ctx.ProcessName))
-            AddChip("", ctx.ProcessName, ctx.WindowTitle, null);
-        if (ctx.SelectedText != null)
-            AddChip("", $"Selection · {Short(ctx.SelectedText.Length)}", Preview(ctx.SelectedText), null);
-        if (ctx.ClipboardText != null)
-            AddChip("", $"Clipboard · {Short(ctx.ClipboardText.Length)}", Preview(ctx.ClipboardText), null);
-        if (ctx.ClipboardImageJpeg != null) AddChip("", "Clipboard image", null, null);
-        if (ctx.ClipboardFiles.Count > 0)
-            AddChip("", $"{ctx.ClipboardFiles.Count} file(s)", string.Join("\n", ctx.ClipboardFiles), null);
-    }
-
-    void AddChip(string glyph, string text, string? tip, Action? click)
-    {
-        var sp = new StackPanel { Orientation = Orientation.Horizontal };
-        sp.Children.Add(new TextBlock { Text = glyph, FontFamily = Icons, FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center });
-        sp.Children.Add(new TextBlock { Text = text, FontSize = 11.5, Foreground = Muted, Margin = new Thickness(5, 0, 0, 1), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 180, TextTrimming = TextTrimming.CharacterEllipsis });
-        var b = new Border { Child = sp, CornerRadius = new CornerRadius(7), Background = ChipBg, Padding = new Thickness(7, 3, 8, 3), Margin = new Thickness(0, 0, 5, 5) };
-        if (!string.IsNullOrEmpty(tip)) b.ToolTip = tip;
-        if (click != null) { b.Cursor = Cursors.Hand; b.MouseLeftButtonUp += (_, _) => click(); }
-        Chips.Children.Add(b);
-    }
-
-    void AddUserBubble(string text)
-    {
-        var tb = MakeText(text, Fg);
+        var sp = new StackPanel();
+        if (attachLine != null)
+        {
+            var line = new StackPanel { Orientation = Orientation.Horizontal };
+            line.Children.Add(new TextBlock { Text = "", FontFamily = Icons, FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center });
+            line.Children.Add(new TextBlock { Text = attachLine, FontSize = 12, Foreground = Muted, Margin = new Thickness(5, 0, 0, 1) });
+            sp.Children.Add(line);
+        }
+        if (text.Length > 0)
+        {
+            var tb = MakeText(text, Fg);
+            if (attachLine != null) tb.Margin = new Thickness(0, 3, 0, 0);
+            sp.Children.Add(tb);
+        }
         Messages.Children.Add(new Border
         {
-            Child = tb,
+            Child = sp,
             Background = UserBg,
             CornerRadius = new CornerRadius(12, 12, 4, 12),
             Padding = new Thickness(10, 6, 10, 7),
@@ -286,23 +374,29 @@ public partial class BubbleWindow : Window
 
     void Close_Click(object sender, RoutedEventArgs e) => Close();
 
-    void Send_Click(object sender, RoutedEventArgs e) => SendInput();
+    void Send_Click(object sender, RoutedEventArgs e) => SendFromInput();
 
     void Input_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Shift) == 0)
         {
             e.Handled = true;
-            SendInput();
+            SendFromInput();
+        }
+        else if (e.Key == Key.Back && Input.CaretIndex == 0 && Input.SelectionLength == 0 && attachments.Count > 0)
+        {
+            e.Handled = true;
+            RemoveAttachment(attachments[^1]);
         }
     }
 
-    void SendInput()
+    void SendFromInput()
     {
-        if (streaming || string.IsNullOrWhiteSpace(Input.Text)) return;
+        if (streaming) return;
         var text = Input.Text;
+        if (text.Trim().Length == 0 && (contextSent || attachments.Count == 0)) return;
         Input.Clear();
-        Send(text, showBubble: true);
+        Send(text);
     }
 
     void Input_TextChanged(object sender, TextChangedEventArgs e) =>
@@ -326,12 +420,22 @@ public partial class BubbleWindow : Window
 
     // ---------- helpers ----------
 
+    static ImageSource Thumbnail(string jpegB64)
+    {
+        var bi = new BitmapImage();
+        bi.BeginInit();
+        bi.StreamSource = new MemoryStream(Convert.FromBase64String(jpegB64));
+        bi.DecodePixelHeight = 66;
+        bi.CacheOption = BitmapCacheOption.OnLoad;
+        bi.EndInit();
+        bi.Freeze();
+        return bi;
+    }
+
     static void Open(string path)
     {
         try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { }
     }
-
-    static string Short(int chars) => chars < 1000 ? $"{chars} chars" : $"{chars / 1000.0:0.#}k chars";
 
     static string Preview(string s) => s.Length <= 600 ? s : s[..600] + "…";
 

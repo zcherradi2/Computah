@@ -50,8 +50,8 @@ sealed class AssistHost : IDisposable
 
         tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Claude Assist — Ctrl+Alt+A", Visible = true };
         var menu = new WF.ContextMenuStrip();
-        menu.Items.Add("Ask Claude about screen  (Ctrl+Alt+A)", null, (_, _) => Trigger(true));
-        menu.Items.Add("Type a question first  (Ctrl+Alt+Shift+A)", null, (_, _) => Trigger(false));
+        menu.Items.Add("Ask Claude  (Ctrl+Alt+A)", null, (_, _) => Trigger(false));
+        menu.Items.Add("Send screen instantly  (Ctrl+Alt+Shift+A)", null, (_, _) => Trigger(true));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Open screenshots folder", null, (_, _) => Shell(Paths.Screenshots, true));
         menu.Items.Add("Edit settings", null, (_, _) => { Settings.Load(); Shell(Paths.SettingsFile, false); });
@@ -78,12 +78,12 @@ sealed class AssistHost : IDisposable
         if (msg == Native.WM_HOTKEY)
         {
             handled = true;
-            Trigger(autoSend: wParam.ToInt32() == HotkeyAuto);
+            Trigger(shift: wParam.ToInt32() == HotkeyAsk);
         }
         return IntPtr.Zero;
     }
 
-    async void Trigger(bool autoSend)
+    async void Trigger(bool shift)
     {
         if (busy) return;
         busy = true;
@@ -91,7 +91,7 @@ sealed class AssistHost : IDisposable
         {
             var settings = Settings.Load();
             var ctx = await ContextCapture.CaptureAsync(settings);
-            new BubbleWindow(ctx, settings, autoSend).Show();
+            new BubbleWindow(ctx, settings, sendNow: settings.SendInstantly ^ shift).Show();
         }
         catch (Exception ex)
         {

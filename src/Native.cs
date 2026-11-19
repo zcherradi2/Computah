@@ -42,6 +42,25 @@ static class Native
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int cb);
 
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool QueryFullProcessImageName(IntPtr h, uint flags, StringBuilder name, ref uint size);
+
+    /// Full exe path; works for elevated processes too (limited-information access).
+    public static string? ProcessPath(uint pid)
+    {
+        var h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var sb = new StringBuilder(1024);
+            uint size = (uint)sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
+        }
+        finally { CloseHandle(h); }
+    }
+
     public static bool IsDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
     public static void SendKeys(params (int vk, bool up)[] keys)
