@@ -31,13 +31,14 @@ public static class Program
 
 sealed class AssistHost : IDisposable
 {
-    const int HotkeyAuto = 1, HotkeyAsk = 2;
+    const int HotkeyId = 1;
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "ClaudeAssist";
 
     readonly Application app;
     readonly HwndSource msgWindow;
     readonly WF.NotifyIcon tray;
     bool busy;
+    BubbleWindow? active;
 
     public AssistHost(Application app)
     {
@@ -50,8 +51,7 @@ sealed class AssistHost : IDisposable
 
         tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Claude Assist — Ctrl+Alt+A", Visible = true };
         var menu = new WF.ContextMenuStrip();
-        menu.Items.Add("Ask Claude  (Ctrl+Alt+A)", null, (_, _) => Trigger(false));
-        menu.Items.Add("Send screen instantly  (Ctrl+Alt+Shift+A)", null, (_, _) => Trigger(true));
+        menu.Items.Add("Ask Claude  (Ctrl+Alt+A, again to send)", null, (_, _) => Trigger());
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Open screenshots folder", null, (_, _) => Shell(Paths.Screenshots, true));
         menu.Items.Add("Edit settings", null, (_, _) => { Settings.Load(); Shell(Paths.SettingsFile, false); });
@@ -62,13 +62,10 @@ sealed class AssistHost : IDisposable
         menu.Items.Add("Exit", null, (_, _) => app.Shutdown());
         tray.ContextMenuStrip = menu;
 
-        bool ok1 = Native.RegisterHotKey(msgWindow.Handle, HotkeyAuto, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A);
-        bool ok2 = Native.RegisterHotKey(msgWindow.Handle, HotkeyAsk, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_SHIFT | Native.MOD_NOREPEAT, Native.VK_A);
-        if (!ok1)
+        if (!Native.RegisterHotKey(msgWindow.Handle, HotkeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A))
             tray.ShowBalloonTip(4000, "Claude Assist", "Ctrl+Alt+A is already used by another app.", WF.ToolTipIcon.Warning);
         else
             tray.ShowBalloonTip(2500, "Claude Assist is running", "Press Ctrl+Alt+A anywhere.", WF.ToolTipIcon.None);
-        if (!ok2) Paths.Log("Ctrl+Alt+Shift+A unavailable");
 
         Settings.Load(); // creates settings.json on first run
     }
@@ -78,20 +75,27 @@ sealed class AssistHost : IDisposable
         if (msg == Native.WM_HOTKEY)
         {
             handled = true;
-            Trigger(shift: wParam.ToInt32() == HotkeyAsk);
+            Trigger();
         }
         return IntPtr.Zero;
     }
 
-    async void Trigger(bool shift)
+    /// First press: capture + compact input. Press again while that input is open and unsent: send it as is.
+    async void Trigger()
     {
+        if (active is { CanSendAsIs: true }) { active.SendAsIs(); return; }
         if (busy) return;
         busy = true;
         try
         {
             var settings = Settings.Load();
             var ctx = await ContextCapture.CaptureAsync(settings);
-            new BubbleWindow(ctx, settings, sendNow: settings.SendInstantly ^ shift).Show();
+            var w = new BubbleWindow(ctx, settings);
+            active = w;
+            w.Closed += (_, _) => { if (active == w) active = null; };
+            w.Show();
+            await ContextCapture.GrabSelectionAsync(ctx, settings);
+            w.ContextReady();
         }
         catch (Exception ex)
         {
@@ -142,8 +146,7 @@ sealed class AssistHost : IDisposable
 
     public void Dispose()
     {
-        Native.UnregisterHotKey(msgWindow.Handle, HotkeyAuto);
-        Native.UnregisterHotKey(msgWindow.Handle, HotkeyAsk);
+        Native.UnregisterHotKey(msgWindow.Handle, HotkeyId);
         tray.Visible = false;
         tray.Dispose();
         msgWindow.Dispose();

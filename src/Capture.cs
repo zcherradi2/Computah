@@ -19,6 +19,7 @@ public sealed class CapturedContext
     public Rectangle Monitor;
     public string WindowTitle = "", ProcessName = "", ProcessPath = "";
     public int ProcessId;
+    public IntPtr ForegroundHwnd;
 
     public string ScreenshotPath = "";
     public string FullJpeg = ""; public int FullW, FullH, FullCursorX, FullCursorY;
@@ -140,17 +141,31 @@ static class ContextCapture
         });
 
         // 2) Clipboard as it was before we touch anything.
+        c.ForegroundHwnd = fg;
         ReadClipboard(c);
-
-        // 3) Selected text via a synthetic Ctrl+C (skipped in terminals where Ctrl+C means "interrupt").
-        if (s.CaptureSelection && !Terminals.Contains(c.ProcessName) && c.ProcessId != Environment.ProcessId)
-        {
-            try { c.SelectedText = await GetSelectionAsync(); }
-            catch (Exception ex) { Paths.Log("selection: " + ex.Message); }
-        }
 
         await encoded.Task;
         return c;
+    }
+
+    /// Selected text via a synthetic Ctrl+C. Runs after the bubble is shown (without focus) and only once the
+    /// user has released the hotkey keys, so no modifier juggling is needed. Skipped in terminals, where
+    /// Ctrl+C means "interrupt", and if focus moved away from the original window.
+    public static async Task GrabSelectionAsync(CapturedContext c, Settings s)
+    {
+        if (!s.CaptureSelection || Terminals.Contains(c.ProcessName) || c.ProcessId == Environment.ProcessId) return;
+
+        var sw = Stopwatch.StartNew();
+        int[] held = { Native.VK_MENU, Native.VK_CONTROL, Native.VK_SHIFT, Native.VK_A, Native.VK_LWIN, Native.VK_RWIN };
+        while (held.Any(Native.IsDown))
+        {
+            if (sw.ElapsedMilliseconds > 2500) return; // keys still held: give up rather than send a wrong combo
+            await Task.Delay(10);
+        }
+        if (Native.GetForegroundWindow() != c.ForegroundHwnd) return;
+
+        try { c.SelectedText = await GetSelectionAsync(); }
+        catch (Exception ex) { Paths.Log("selection: " + ex.Message); }
     }
 
     static void ReadClipboard(CapturedContext c)
@@ -168,20 +183,9 @@ static class ContextCapture
 
     static async Task<string?> GetSelectionAsync()
     {
-        // Wait for the user to let go of Ctrl/Alt/Shift/A, otherwise our Ctrl+C becomes Ctrl+Alt+C.
-        var sw = Stopwatch.StartNew();
-        int[] held = { Native.VK_MENU, Native.VK_CONTROL, Native.VK_SHIFT, Native.VK_A, Native.VK_LWIN, Native.VK_RWIN };
-        while (sw.ElapsedMilliseconds < 700 && held.Any(Native.IsDown)) await Task.Delay(10);
-
-        var keys = new List<(int, bool)>();
-        foreach (var vk in new[] { Native.VK_MENU, Native.VK_SHIFT, Native.VK_LWIN, Native.VK_RWIN })
-            if (Native.IsDown(vk)) keys.Add((vk, true));
-        keys.Add((Native.VK_CONTROL, false)); keys.Add((Native.VK_C, false));
-        keys.Add((Native.VK_C, true)); keys.Add((Native.VK_CONTROL, true));
-
         var snapshot = Snapshot();
         uint seq = Native.GetClipboardSequenceNumber();
-        Native.SendKeys(keys.ToArray());
+        Native.SendKeys((Native.VK_CONTROL, false), (Native.VK_C, false), (Native.VK_C, true), (Native.VK_CONTROL, true));
 
         bool changed = false;
         for (int i = 0; i < 25 && !changed; i++)

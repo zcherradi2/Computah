@@ -30,8 +30,8 @@ public partial class BubbleWindow : Window
 
     readonly CapturedContext ctx;
     readonly Settings settings;
-    readonly bool sendNow;
     readonly bool anchorBelow;
+    bool contextReady, sendRequested;
     readonly List<Attachment> attachments = new();
 
     ClaudeSession? session;
@@ -41,12 +41,12 @@ public partial class BubbleWindow : Window
     readonly StringBuilder pending = new();
     readonly object gate = new();
 
-    public BubbleWindow(CapturedContext ctx, Settings settings, bool sendNow)
+    public BubbleWindow(CapturedContext ctx, Settings settings)
     {
         this.ctx = ctx;
         this.settings = settings;
-        this.sendNow = sendNow;
         InitializeComponent();
+        ShowActivated = false; // keep focus on the user's app until the selection has been grabbed
 
         var wa = WF.Screen.FromPoint(new System.Drawing.Point(ctx.CursorX, ctx.CursorY)).WorkingArea;
         anchorBelow = ctx.CursorY < wa.Top + wa.Height * 0.55;
@@ -74,12 +74,36 @@ public partial class BubbleWindow : Window
         BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120)));
         Slide.BeginAnimation(TranslateTransform.YProperty,
             new DoubleAnimation(anchorBelow ? -6 : 6, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+    }
+
+    public bool IsClosed => closed;
+
+    /// True while the compact input is open and nothing has been sent yet.
+    public bool CanSendAsIs => !contextSent && !closed;
+
+    /// Second Ctrl+Alt+A press: send now (waits for the selection grab if it's still running).
+    public void SendAsIs()
+    {
+        if (!contextReady) { sendRequested = true; return; }
+        Send(Input.Text);
+        Input.Clear();
+    }
+
+    /// Called once the selected text has been grabbed (or skipped).
+    public void ContextReady()
+    {
+        if (closed) return;
+        contextReady = true;
+        if (!contextSent && ctx.SelectedText != null)
+            AddAttachment("selection", "Selection", null, Preview(ctx.SelectedText), "", "Selection",
+                          at: attachments.Count > 0 && attachments[0].Kind == "screen" ? 1 : 0);
+        UpdatePlaceholder();
 
         Native.ForceForeground(new WindowInteropHelper(this).Handle);
         Activate();
         Input.Focus();
 
-        if (sendNow) Send("");
+        if (sendRequested) { sendRequested = false; SendAsIs(); }
     }
 
     void OnClosed(object? sender, EventArgs e)
@@ -106,8 +130,6 @@ public partial class BubbleWindow : Window
     void BuildAttachments()
     {
         AddAttachment("screen", "Screen", ScreenChip(), $"Screenshot + mouse position\n{ctx.ScreenshotPath}");
-        if (ctx.SelectedText != null)
-            AddAttachment("selection", "Selection", null, Preview(ctx.SelectedText), "", "Selection");
         if (ctx.HasClipboard)
         {
             string label = ctx.ClipboardText != null ? "Clipboard"
@@ -129,7 +151,7 @@ public partial class BubbleWindow : Window
         return thumb;
     }
 
-    void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip, string? glyph = null, string? text = null)
+    void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip, string? glyph = null, string? text = null, int? at = null)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         if (visual != null) sp.Children.Add(visual);
@@ -153,8 +175,9 @@ public partial class BubbleWindow : Window
 
         var a = new Attachment(kind, label, chip);
         x.MouseLeftButtonUp += (_, e) => { e.Handled = true; RemoveAttachment(a); };
-        attachments.Add(a);
-        Attachments.Children.Add(chip);
+        int i = Math.Clamp(at ?? attachments.Count, 0, attachments.Count);
+        attachments.Insert(i, a);
+        Attachments.Children.Insert(i, chip);
 
         void thumbOpen(Border b) => b.MouseLeftButtonUp += (_, e) => { if (!e.Handled) Open(ctx.ScreenshotPath); };
     }
