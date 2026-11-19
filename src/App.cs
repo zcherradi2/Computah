@@ -111,9 +111,19 @@ sealed class AssistHost : IDisposable
     /// `explicitTarget` is set when a session is opened from the panel (no selection grab then).
     async void Trigger(int hotkey, SessionRecord? explicitTarget = null)
     {
+        // Double tap = A pressed again while the modifiers stayed held → send what's pending.
+        // Pressing the whole chord again after letting go → re-capture (handled below).
+        bool doubleTap = explicitTarget == null && chordHeld && chordHotkey == hotkey;
+        if (explicitTarget == null) WatchChord(hotkey);
+
         var focusedWin = store.Focused?.Window;
-        if (explicitTarget == null && focusedWin != null && focusedWin.CanSendAsIs(hotkey)) { focusedWin.SendAsIs(); return; }
-        if (busy) { if (hotkey == busyHotkey) sendQueued = true; return; } // fast double press during capture
+        if (doubleTap)
+        {
+            if (busy) { if (hotkey == busyHotkey) sendQueued = true; }
+            else if (focusedWin != null && focusedWin.CanSendAsIs(hotkey)) focusedWin.SendAsIs();
+            return;
+        }
+        if (busy) return;
 
         var settings = Settings.Load();
         var agent = Agents.Resolve(settings);
@@ -124,9 +134,20 @@ sealed class AssistHost : IDisposable
         sendQueued = false;
         try
         {
-            var ctx = await ContextCapture.CaptureAsync(settings);
+            // The session this capture goes to. Alt+A pressed again while its popup is still unsent
+            // re-captures into that same popup instead of opening another one.
+            SessionRecord? rec = hotkey == HotkeyContinue ? explicitTarget ?? store.Focused
+                               : focusedWin != null && focusedWin.CanSendAsIs(hotkey) ? store.Focused : null;
 
-            SessionRecord? rec = hotkey == HotkeyContinue ? explicitTarget ?? store.Focused : null;
+            // Hide its popup so it isn't in the new screenshot.
+            var existing = rec?.Window;
+            if (existing is { IsVisible: true })
+            {
+                existing.Hide();
+                await Task.Delay(120);
+            }
+
+            var ctx = await ContextCapture.CaptureAsync(settings);
             BubbleWindow w;
             if (rec?.Window != null) w = rec.Window;
             else if (rec != null && Agents.ById(rec.AgentId) is { } recAgent) w = OpenBubble(rec, recAgent, settings);
@@ -139,8 +160,10 @@ sealed class AssistHost : IDisposable
 
             w.AttachContext(ctx, hotkey);
             if (!w.IsVisible) w.Show();
-            if (sendQueued) w.SendAsIs(); // runs once the selection grab finishes
             if (explicitTarget == null) await ContextCapture.GrabSelectionAsync(ctx, settings);
+            // A double tap can land at any point while we were busy: check only now, after the new
+            // context is attached, so nothing resets it. It sends as soon as the bubble is ready.
+            if (sendQueued) w.SendAsIs();
             w.ContextReady(ctx);
         }
         catch (Exception ex)
@@ -149,6 +172,24 @@ sealed class AssistHost : IDisposable
             tray.ShowBalloonTip(4000, "Computah", ex.Message, WF.ToolTipIcon.Error);
         }
         finally { busy = false; }
+    }
+
+    bool chordHeld;
+    int chordHotkey, chordGen;
+
+    /// Tracks whether the hotkey's modifiers stay held after a press (Alt, plus Ctrl for Ctrl+Alt+A).
+    async void WatchChord(int hotkey)
+    {
+        int gen = ++chordGen;
+        chordHeld = true;
+        chordHotkey = hotkey;
+        bool needCtrl = hotkey == HotkeyContinue;
+        while (Native.IsDown(Native.VK_MENU) && (!needCtrl || Native.IsDown(Native.VK_CONTROL)))
+        {
+            await Task.Delay(15);
+            if (gen != chordGen) return; // a newer press took over
+        }
+        if (gen == chordGen) chordHeld = false;
     }
 
     BubbleWindow OpenBubble(SessionRecord rec, AgentInfo agent, Settings settings)
