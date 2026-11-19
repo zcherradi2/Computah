@@ -77,6 +77,19 @@ sealed class AssistHost : IDisposable
             foreach (WF.ToolStripMenuItem i in control.DropDownItems) i.Checked = (string)i.Tag! == current;
         };
         menu.Items.Add(control);
+        var sight = new WF.ToolStripMenuItem("Sight");
+        foreach (var (label, value) in new[] { ("Perfect: whole screen + elements", "perfect"), ("Narrow: area around the pointer + elements", "narrow"), ("None: elements only, no image", "none") })
+        {
+            var item = new WF.ToolStripMenuItem(label) { Tag = value };
+            item.Click += (_, _) => { var s = Settings.Load(); s.Sight = value; s.Save(); };
+            sight.DropDownItems.Add(item);
+        }
+        sight.DropDownOpening += (_, _) =>
+        {
+            var current = Settings.Load().SightMode;
+            foreach (WF.ToolStripMenuItem i in sight.DropDownItems) i.Checked = (string)i.Tag! == current;
+        };
+        menu.Items.Add(sight);
         var showDock = new WF.ToolStripMenuItem("Show floating button") { Checked = settings.ShowDock, CheckOnClick = true };
         showDock.CheckedChanged += (_, _) => { var s = Settings.Load(); s.ShowDock = showDock.Checked; s.Save(); SetDockVisible(showDock.Checked); };
         menu.Items.Add(showDock);

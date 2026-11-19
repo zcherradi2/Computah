@@ -31,6 +31,9 @@ public sealed class CapturedContext
     // The user can remove attachments before sending.
     public bool IncludeScreen = true, IncludeSelection = true, IncludeClipboard = true;
 
+    /// perfect | narrow | none (settings.sight at capture time).
+    public string Sight = "perfect";
+
     public bool HasClipboard => ClipboardText != null || ClipboardImageJpeg != null || ClipboardFiles.Count > 0;
 
     /// The focused window's buttons, links, fields... (Windows accessibility), scanned in the background while capturing.
@@ -46,11 +49,12 @@ public sealed class CapturedContext
     public List<object> ImageBlocks()
     {
         var list = new List<object>();
-        if (IncludeScreen)
+        if (IncludeScreen && Sight == "perfect")
         {
             list.Add(Img.Block(FullJpeg));
             if (CropJpeg != null) list.Add(Img.Block(CropJpeg));
         }
+        else if (IncludeScreen && Sight == "narrow" && CropJpeg != null) list.Add(Img.Block(CropJpeg));
         if (IncludeClipboard && ClipboardImageJpeg != null) list.Add(Img.Block(ClipboardImageJpeg));
         return list;
     }
@@ -67,11 +71,28 @@ public sealed class CapturedContext
         sb.AppendLine($"  Path: {(ProcessPath.Length > 0 ? ProcessPath : "unknown")}");
         sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor " +
                       $"(monitor origin {Monitor.X}, {Monitor.Y} in virtual-screen coordinates).");
-        if (IncludeScreen)
+        double s = (double)FullW / Math.Max(1, Monitor.Width);
+        if (IncludeScreen && Sight == "perfect")
         {
+            sb.AppendLine($"SIGHT: perfect (whole screen). Screen space = Image 1 = {FullW}x{FullH}.");
             sb.AppendLine($"Image {n++}: the whole monitor scaled to {FullW}x{FullH}; pointer at ({FullCursorX}, {FullCursorY}), marked with a red circle.");
             if (CropJpeg != null)
                 sb.AppendLine($"Image {n++}: full-resolution {CropW}x{CropH} crop around the pointer; pointer at ({CropCursorX}, {CropCursorY}), red circle.");
+        }
+        else if (IncludeScreen && Sight == "narrow" && CropJpeg != null)
+        {
+            int x0 = (int)(CropX * s), y0 = (int)(CropY * s), x1 = (int)((CropX + CropW) * s), y1 = (int)((CropY + CropH) * s);
+            sb.AppendLine($"SIGHT: narrow. You see only one image: a full-resolution {CropW}x{CropH} view of part of the screen. " +
+                          $"Screen space (used by the element list and by plain x/y) is {FullW}x{FullH}; this view covers screen-space box ({x0},{y0})-({x1},{y1}).");
+            sb.AppendLine("To aim at something you see in the view, use image=\"2\" with pixel coordinates in the view (or element=\"N\"). " +
+                          "To see another area, end with <action type=\"look\" element=\"N\"/> or <action type=\"look\" x=\"...\" y=\"...\"/> (screen space): the next view is centred there.");
+            if (CropCursorX >= 0 && CropCursorX < CropW && CropCursorY >= 0 && CropCursorY < CropH)
+                sb.AppendLine($"The pointer is in the view at ({CropCursorX}, {CropCursorY}), red circle.");
+        }
+        else if (IncludeScreen && Sight == "none")
+        {
+            sb.AppendLine($"SIGHT: none. No image is shared: rely on the element list. Screen space is {FullW}x{FullH}; " +
+                          $"pointer at ({FullCursorX}, {FullCursorY}). Aim with element=\"N\"; plain x/y are screen-space guesses.");
         }
 
         var withheld = new List<string>();
@@ -111,9 +132,10 @@ static class ContextCapture
         "mintty", "kitty", "Hyper", "Tabby", "wsl", "bash", "ubuntu", "putty", "kitty", "warp", "ConEmu64", "ConEmu",
     };
 
-    public static async Task<CapturedContext> CaptureAsync(Settings s)
+    /// focus: where a narrow view should be centred (physical screen pixels); default: the pointer.
+    public static async Task<CapturedContext> CaptureAsync(Settings s, Point? focus = null)
     {
-        var c = new CapturedContext { Time = DateTime.Now };
+        var c = new CapturedContext { Time = DateTime.Now, Sight = s.SightMode };
         Native.GetCursorPos(out var pt);
         c.CursorX = pt.X; c.CursorY = pt.Y;
 
@@ -145,10 +167,13 @@ static class ContextCapture
                     (g, scale) => Img.Marker(g, (float)(mx * scale), (float)(my * scale), 13));
                 c.FullCursorX = (int)(mx * sc); c.FullCursorY = (int)(my * sc);
 
-                if (s.SendCursorCrop && (bmp.Width > 1100 || bmp.Height > 700))
+                bool narrow = c.Sight == "narrow";
+                if (narrow || c.Sight == "perfect" && s.SendCursorCrop && (bmp.Width > 1100 || bmp.Height > 700))
                 {
+                    // centred on the pointer, or on the spot the agent asked to look at
+                    int fx = focus is { } f ? f.X - c.Monitor.X : mx, fy = focus is { } f2 ? f2.Y - c.Monitor.Y : my;
                     int cw = Math.Min(1000, bmp.Width), ch = Math.Min(640, bmp.Height);
-                    int cx = Math.Clamp(mx - cw / 2, 0, bmp.Width - cw), cy = Math.Clamp(my - ch / 2, 0, bmp.Height - ch);
+                    int cx = Math.Clamp(fx - cw / 2, 0, bmp.Width - cw), cy = Math.Clamp(fy - ch / 2, 0, bmp.Height - ch);
                     c.CropJpeg = Img.CropJpeg(bmp, new Rectangle(cx, cy, cw, ch), g => Img.Marker(g, mx - cx, my - cy, 16));
                     c.CropW = cw; c.CropH = ch; c.CropCursorX = mx - cx; c.CropCursorY = my - cy;
                     c.CropX = cx; c.CropY = cy;

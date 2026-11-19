@@ -201,6 +201,19 @@ Every capture also scans the focused window through Windows UI Automation (acces
 - **Limits:** things without accessibility info, such as bare icon buttons in some web apps, canvases and games, still need x/y.
 - Not done yet: numbered marks drawn on the screenshot (set-of-marks).
 
+### Sight modes (`settings.sight`, tray menu → Sight)
+
+| Mode | Images sent | Element list |
+|---|---|---|
+| `perfect` (default) | whole screen (Image 1) + 1000×640 crop around the pointer | yes |
+| `narrow` | only the 1000×640 full-resolution view, around the pointer | yes |
+| `none` | no image | yes |
+
+- **Coordinates:** x/y always mean "screen space", the scaled full-screen size, the same as the element list, in every mode.
+- **In the narrow view:** the agent aims with `image="2"` or `element="N"`.
+- **Moving the view:** `<action type="look" element="N"/>` or `<action type="look" x y/>` centres the next capture there (`ActionRunner.Result.LookAt` → `ContextCapture.CaptureAsync(settings, focus)`).
+- **The screen chip** in the bubble shows the mode: "Screen (narrow)" / "Screen (elements only)".
+
 ## 5. What the agent is told (Prompts.cs)
 
 1. **Identity and input:** what Computah sends (image 1 scaled, image 2 crop, app, pointer, selection), and that withheld items must not be fetched another way. Reply style: short, plain text.

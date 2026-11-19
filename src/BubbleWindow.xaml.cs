@@ -279,7 +279,8 @@ public partial class BubbleWindow : Window
 
     void BuildAttachments(CapturedContext ctx)
     {
-        AddAttachment("screen", "Screen", ScreenChip(ctx), $"Screenshot + mouse marker\n{ctx.ScreenshotPath}", open: ctx.ScreenshotPath);
+        var sightLabel = ctx.Sight switch { "narrow" => "Screen (narrow)", "none" => "Screen (elements only)", _ => "Screen" };
+        AddAttachment("screen", sightLabel, ScreenChip(ctx), $"{sightLabel}: what the agent sees (tray menu > Sight)\n{ctx.ScreenshotPath}", open: ctx.ScreenshotPath);
         if (ctx.HasClipboard)
         {
             string label = ctx.ClipboardText != null ? "Clipboard"
@@ -758,7 +759,7 @@ public partial class BubbleWindow : Window
             await Task.Delay(450);  // let the screen settle
             try
             {
-                shot = await ContextCapture.CaptureAsync(Settings.Load());
+                shot = await ContextCapture.CaptureAsync(Settings.Load(), res.LookAt);
                 await shot.WaitForElements(2500); // the element list makes the next clicks exact
             }
             catch (Exception ex) { Paths.Log("look: " + ex.Message); }

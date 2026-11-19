@@ -70,6 +70,11 @@ public sealed class Settings
 
     public bool CaptureSelection { get; set; } = true;// sends Ctrl+C to grab selected text (clipboard is restored)
     public bool SendCursorCrop { get; set; } = true;     // extra full-resolution crop around the pointer
+
+    /// What the agent sees with each capture: "perfect" (whole screen + crop + element list), "narrow" (only a
+    /// full-resolution view around the pointer, movable by the agent, + element list) or "none" (element list only).
+    public string Sight { get; set; } = "perfect";
+    public string SightMode => Sight?.Trim().ToLowerInvariant() is "narrow" or "none" ? Sight.Trim().ToLowerInvariant() : "perfect";
     public bool LoadMcpServers { get; set; } = false;    // MCP servers slow down startup
     public string AllowedTools { get; set; } = "";       // e.g. "Read WebSearch WebFetch"
 

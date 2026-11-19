@@ -13,7 +13,9 @@ static class ActionRunner
     /// Look: take a screenshot afterwards. Stopped: why it stopped early (the user interrupted, an error).
     /// NeedsAim: actions that were held back because there was no up-to-date screenshot to aim them with (and why);
     /// Computah then takes one and asks the agent to re-issue them.
-    public sealed record Result(bool Look, string? Stopped, List<string> Done, List<string>? HeldBack = null, string? HeldBackWhy = null);
+    /// LookAt: where the next screenshot should be centred (narrow sight), when the look action named a spot.
+    public sealed record Result(bool Look, string? Stopped, List<string> Done, List<string>? HeldBack = null, string? HeldBackWhy = null,
+                                System.Drawing.Point? LookAt = null);
 
     /// Plain-language description, for the approval card and the report back to the agent.
     public static string Describe(HintTag a) => (a.Get("type") ?? "").ToLowerInvariant() switch
@@ -26,7 +28,7 @@ static class ActionRunner
         "drag" => $"Drag from ({a.Get("x1")}, {a.Get("y1")}) to ({a.Get("x2")}, {a.Get("y2")})",
         "move" => $"Move the mouse to ({a.Get("x")}, {a.Get("y")})",
         "wait" => $"Wait {a.Get("ms")} ms",
-        "look" => "Take a new screenshot",
+        "look" => a.Get("element") is { } le ? $"Look around element {le}" : a.Get("x") != null ? $"Look around ({a.Get("x")}, {a.Get("y")})" : "Take a new screenshot",
         "focus" => $"Bring playground {a.Get("playground") ?? a.Get("title")} to the front",
         var t => $"Unknown action \"{t}\"",
     };
@@ -49,6 +51,7 @@ static class ActionRunner
             await Task.Delay(150);
         }
 
+        System.Drawing.Point? lookAt = null;
         bool stale = map == null; // no screenshot yet, or the screen switched windows since
         string staleWhy = "there was no current screenshot to aim with";
         for (int ai = 0; ai < actions.Count; ai++)
@@ -58,7 +61,14 @@ static class ActionRunner
             if (Moved(expected)) return new(false, "you moved the mouse", done);
 
             var type = (a.Get("type") ?? "").ToLowerInvariant();
-            if (type == "look") { look = true; continue; }
+            if (type == "look")
+            {
+                look = true;
+                // look element="N" / x,y: centre the next (narrow) view there
+                if (map != null && !stale && (a.Get("element") != null || a.Get("x") != null) && map.ResolveElement(a, "look") && Target(a, "x", "y", map) is { } at)
+                    lookAt = new System.Drawing.Point((int)at.X, (int)at.Y);
+                continue;
+            }
             // element="N": aim at that element (exact). Typing into one clicks it first.
             if (a.Get("element") != null && !stale && map != null)
             {
@@ -145,7 +155,7 @@ static class ActionRunner
             done.Add(Describe(a));
             await Task.Delay(140);
         }
-        return new(look, null, done);
+        return new(look, null, done, LookAt: lookAt);
     }
 
     static Point? Target(HintTag a, string kx, string ky, ScreenMap map)

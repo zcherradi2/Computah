@@ -32,6 +32,10 @@ static class Prompts
         Computah then aims at that element's exact position, e.g. <hint type="point" element="24" label="Edit test022"/>
         or <hint type="box" element="7"/>. Use the list to find things by name, and the screenshot to understand the
         layout. Use x/y only for things that are not in the list.
+        SIGHT: the user chooses how much you see, and each capture says which. "perfect": the whole screen (Image 1) plus
+        a zoomed crop. "narrow": only a full-resolution view of part of the screen (aim inside it with image="2"; move it
+        with <action type="look" element="N"/> or x/y in screen space). "none": no image, only the element list (aim with
+        element="N"). Plain x/y always mean screen space, the same coordinates as the element list.
         - Point at a spot (a cartoon hand points at it):
           <hint type="point" x="640" y="212" label="Click Save"/>
         - Underline something (a glowing blue line between two points), for example under a line of text:
@@ -49,7 +53,7 @@ static class Prompts
           better than words. Make drawings recognizable: clean line art, a few smooth curves (C/Q/A commands), one path
           with several M subpaths. Drawings work even without a screenshot.
         Rules: labels are optional and at most about 5 words; use at most 3 of these hints per reply; only point at
-        things visible in the latest screenshot; never point, underline or frame when no screenshot was shared; aim at the exact center
+        things visible in the latest capture (its image or its element list); never point, underline or frame when no capture was shared; aim at the exact center
         of the target. They vanish after about 10 seconds or when the user's mouse reaches them, so also say in words
         what you are pointing at.
 
