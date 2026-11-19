@@ -182,6 +182,15 @@ sealed class AssistHost : IDisposable
             }
             SetFocused(rec);
 
+            // The window Computah was called from becomes (or refreshes) a playground of this session.
+            if (Playgrounds.From(ctx) is { } pg)
+            {
+                rec.TouchPlayground(pg);
+                store.Save();
+                RefreshUi();
+                if (pg.IsBrowser) _ = FillPlaygroundUrl(rec, pg, ctx.ForegroundHwnd);
+            }
+
             w.AttachContext(ctx, hotkey);
             if (!w.IsVisible) w.Show();
             await ContextCapture.GrabSelectionAsync(ctx, settings);
@@ -216,10 +225,28 @@ sealed class AssistHost : IDisposable
         if (gen == chordGen) chordHeld = false;
     }
 
+    /// Browser playgrounds: read the tab's address in the background, then merge with an earlier entry for the same site.
+    async Task FillPlaygroundUrl(SessionRecord rec, Playground pg, IntPtr hwnd)
+    {
+        var url = await Playgrounds.BrowserUrlAsync(hwnd);
+        if (url == null) return;
+        pg.Url = url;
+        var dup = rec.Playgrounds.FirstOrDefault(x => x != pg && x.SameAs(pg));
+        if (dup != null) { pg.Added = dup.Added; rec.Playgrounds.Remove(dup); }
+        store.Save();
+        RefreshUi();
+    }
+
     BubbleWindow OpenBubble(SessionRecord rec, AgentInfo agent, Settings settings)
     {
         var w = new BubbleWindow(settings, agent, rec.AgentSessionId, rec.History, rec.SharedPaths);
         rec.Window = w;
+        w.Record = rec;
+        w.RefreshSetup();
+        w.SetupChanged += () => { store.Save(); RefreshUi(); };
+        w.AccessPaths = () => rec.AccessPaths;
+        w.SessionContext = () => Playgrounds.Describe(rec);
+        w.WorkspaceAdded += (path, edit) => { rec.AddWorkspace(path, edit); store.Save(); RefreshUi(); };
         w.LogName = () => $"\"{rec.Title}\" (session {rec.Id[..8]})";
         w.Changed += () =>
         {
@@ -278,8 +305,17 @@ sealed class AssistHost : IDisposable
             w = OpenBubble(rec, agent, settings);
         }
         SetFocused(rec!);
-        w.ShareFiles(paths);
+        // Folders dropped on the button become the session's workspaces; files are shared with the next message.
+        var folders = paths.Where(System.IO.Directory.Exists).ToList();
+        var added = folders.Where(f => rec!.AddWorkspace(f)).ToList();
+        if (added.Count > 0)
+            w.Notice("Workspace: " + string.Join(", ", added.Select(f => System.IO.Path.GetFileName(f.TrimEnd('\\')))) +
+                     ". The agent will focus its work there and can edit it (every change shows up with Undo).");
+        else if (folders.Count > 0) w.Notice("Already a workspace of this session.");
+        var files = paths.Except(folders).ToArray();
+        if (files.Length > 0) w.ShareFiles(files);
         store.Save();
+        RefreshUi();
         Native.GetCursorPos(out var pt);
         w.ShowFocused(pt.X, pt.Y);
     }
@@ -315,6 +351,7 @@ sealed class AssistHost : IDisposable
     {
         dock?.Refresh();
         panel?.Refresh();
+        foreach (var s in store.Sessions) s.Window?.RefreshSetup();
     }
 
     void SetDockVisible(bool visible)
@@ -353,6 +390,11 @@ sealed class AssistHost : IDisposable
             store.Save();
             w?.Close();
             RefreshUi();
+        };
+        panel.SessionChanged += rec =>
+        {
+            store.Save();
+            RefreshUi(); // an open bubble picks up the new access with its next message
         };
         panel.RenameRequested += (rec, name) =>
         {

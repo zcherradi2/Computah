@@ -23,12 +23,14 @@ static class ActionRunner
         "move" => $"Move the mouse to ({a.Get("x")}, {a.Get("y")})",
         "wait" => $"Wait {a.Get("ms")} ms",
         "look" => "Take a new screenshot",
+        "focus" => $"Bring playground {a.Get("playground") ?? a.Get("title")} to the front",
         var t => $"Unknown action \"{t}\"",
     };
 
     public static bool NeedsScreen(HintTag a) => (a.Get("type") ?? "").ToLowerInvariant() is "click" or "scroll" or "drag" or "move";
 
-    public static async Task<Result> RunAsync(List<HintTag> actions, ScreenMap? map, IntPtr focusTarget, Action<Point>? flash)
+    public static async Task<Result> RunAsync(List<HintTag> actions, ScreenMap? map, IntPtr focusTarget, Action<Point>? flash,
+                                             Func<HintTag, Task<string?>>? focusPlayground = null)
     {
         var done = new List<string>();
         bool look = false;
@@ -101,6 +103,13 @@ static class ActionRunner
                 case "wait":
                     await Task.Delay(Math.Clamp(int.TryParse(a.Get("ms"), out var ms) ? ms : 500, 0, 5000));
                     break;
+                case "focus":
+                {
+                    var err = focusPlayground == null ? "no playgrounds in this session" : await focusPlayground(a);
+                    if (err != null) { done.Add($"(couldn't bring playground {a.Get("playground") ?? a.Get("title")} to the front: {err})"); continue; }
+                    await Task.Delay(600); // let it come up and repaint before the next step or the screenshot
+                    break;
+                }
                 default:
                     done.Add($"(skipped unknown action \"{type}\")");
                     continue;

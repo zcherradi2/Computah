@@ -23,6 +23,45 @@ public sealed class SessionRecord
     /// Files and folders the user dropped on Computah for this session; the agent may read them.
     public List<string> SharedPaths { get; set; } = new();
 
+    /// The folders/files this session mainly works on (like a repo). The agent reads them and, when Edit is on, changes them.
+    public List<Workspace> Workspaces { get; set; } = new();
+
+    /// The windows where the work runs and gets tested (a browser tab with the app, a program...). Newest first.
+    public List<Playground> Playgrounds { get; set; } = new();
+
+    public const int MaxPlaygrounds = 5;
+
+    /// What the agent gets as file access: the shared paths plus the workspaces ("edit:" prefix when edits are allowed).
+    [JsonIgnore]
+    public IEnumerable<string> AccessPaths =>
+        SharedPaths.Concat(Workspaces.Where(w => File.Exists(w.Path) || Directory.Exists(w.Path))
+                                     .Select(w => w.Edit ? SharedAccess.EditPrefix + w.Path : w.Path));
+
+    public bool AddWorkspace(string path, bool edit = true)
+    {
+        path = Path.GetFullPath(path).TrimEnd('\\');
+        if (path.Length == 2) path += "\\";
+        var existing = Workspaces.FirstOrDefault(w => string.Equals(w.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (existing != null) { if (edit && !existing.Edit) { existing.Edit = true; return true; } return false; }
+        Workspaces.Add(new Workspace { Path = path, Edit = edit });
+        return true;
+    }
+
+    /// Remember the window Computah was called from. Browser tabs are told apart by site, other apps by window title.
+    public void TouchPlayground(Playground p)
+    {
+        var same = Playgrounds.FirstOrDefault(x => x.SameAs(p));
+        if (same != null)
+        {
+            Playgrounds.Remove(same);
+            p.Added = same.Added;
+            p.Url ??= same.Url;
+        }
+        p.LastUsed = DateTime.Now;
+        Playgrounds.Insert(0, p);
+        if (Playgrounds.Count > MaxPlaygrounds) Playgrounds.RemoveRange(MaxPlaygrounds, Playgrounds.Count - MaxPlaygrounds);
+    }
+
     [JsonIgnore] public BubbleWindow? Window { get; set; }
     [JsonIgnore] public bool TitleRequested { get; set; }
 
@@ -38,6 +77,57 @@ public sealed class SessionRecord
             text = text.ReplaceLineEndings(" ");
             return text.Length > 70 ? text[..70] + "…" : text;
         }
+    }
+}
+
+public sealed class Workspace
+{
+    public string Path { get; set; } = "";
+    public bool Edit { get; set; } = true;
+    [JsonIgnore] public string Name => System.IO.Path.GetFileName(Path.TrimEnd('\\')) is { Length: > 0 } n ? n : Path;
+    [JsonIgnore] public bool IsFolder => Directory.Exists(Path);
+}
+
+public sealed class Playground
+{
+    public string Process { get; set; } = "";       // e.g. chrome
+    public string Title { get; set; } = "";         // window title when last used
+    public string? Url { get; set; }                // browsers: the page address
+    public string? ExePath { get; set; }
+    public long Window { get; set; }                // the window handle when last seen (checked before use)
+    public DateTime Added { get; set; } = DateTime.Now;
+    public DateTime LastUsed { get; set; } = DateTime.Now;
+
+    static readonly string[] Browsers = { "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc" };
+    [JsonIgnore] public bool IsBrowser => Browsers.Contains(Process.ToLowerInvariant());
+
+    /// Site of a browser tab (host + port), e.g. "localhost:4200".
+    [JsonIgnore]
+    public string? Site => Url != null && Uri.TryCreate(Url.Contains("://") ? Url : "http://" + Url, UriKind.Absolute, out var u)
+        ? (u.IsDefaultPort ? u.Host : $"{u.Host}:{u.Port}") : null;
+
+    /// Short name for chips: the site for browser tabs, else the window title (without the app name suffix).
+    [JsonIgnore]
+    public string Label
+    {
+        get
+        {
+            if (IsBrowser && Site != null) return Site;
+            var t = Title;
+            foreach (var sep in new[] { " - ", " — ", " – " })
+            {
+                int i = t.LastIndexOf(sep, StringComparison.Ordinal);
+                if (i > 0) { t = t[..i]; break; }
+            }
+            return t.Length > 0 ? t : Process;
+        }
+    }
+
+    public bool SameAs(Playground o)
+    {
+        if (!string.Equals(Process, o.Process, StringComparison.OrdinalIgnoreCase)) return false;
+        if (IsBrowser && Site != null && o.Site != null) return Site == o.Site;
+        return string.Equals(Label, o.Label, StringComparison.OrdinalIgnoreCase);
     }
 }
 

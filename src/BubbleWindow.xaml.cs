@@ -86,6 +86,17 @@ public partial class BubbleWindow : Window
 
     // Files/folders shared with this session (the SessionRecord's list), and what the running agent was started with.
     readonly List<string> sharedPaths;
+
+    /// Everything the agent may access: set by the app to include the session's workspaces.
+    public Func<IEnumerable<string>>? AccessPaths;
+    IEnumerable<string> Access() => AccessPaths?.Invoke() ?? sharedPaths;
+
+    /// The session's workspaces and playgrounds, described for the agent (null when there are none).
+    public Func<string?>? SessionContext;
+    string? sentContext; // told to the agent already: only resent when it changes
+
+    /// The agent proposed a workspace and the user accepted (path, edits allowed).
+    public event Action<string, bool>? WorkspaceAdded;
     string startedPaths = "";
 
     public BubbleWindow(Settings settings, AgentInfo agent, string? resumeId = null, IReadOnlyList<Turn>? history = null,
@@ -158,7 +169,7 @@ public partial class BubbleWindow : Window
 
     void StartSession(string? resume = null, bool refreshInstructions = false)
     {
-        var paths = sharedPaths.ToList();
+        var paths = Access().ToList();
         session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions, paths) { LogName = () => LogName?.Invoke() ?? "session" };
         startedPaths = string.Join("|", paths);
         session.Text += t =>
@@ -400,6 +411,11 @@ public partial class BubbleWindow : Window
         Attachments.Visibility = Visibility.Collapsed;
         if (pendingReport != null) { body = pendingReport + "\n\n" + body; pendingReport = null; }
         if (UndoNews() is { } undo) body = undo + "\n\n" + body;
+        if (SessionContext?.Invoke() is { } sc && (sc != sentContext || session == null || SessionId == null))
+        {
+            body = sc + "\n\n" + body;
+            sentContext = sc;
+        }
         if (PeekWindow.DescribeOpen(this) is { } cards) body = cards + "\n\n" + body;
         blocks.Add(new { type = "text", text = body });
         Dispatch(blocks, text, attachLine);
@@ -411,7 +427,7 @@ public partial class BubbleWindow : Window
         // The control permission changed since this agent started: restart it (same conversation) so it knows.
         // The control permission or the shared files changed since this agent started: restart it
         // (same conversation) so it has the right instructions and file access.
-        if (session != null && (Settings.Load().Control != settings.Control || string.Join("|", sharedPaths) != startedPaths))
+        if (session != null && (Settings.Load().Control != settings.Control || string.Join("|", Access()) != startedPaths))
             RestartSession();
         if (session == null)
         {
@@ -581,11 +597,53 @@ public partial class BubbleWindow : Window
     /// The agent asked to read (or edit) files/folders it can't reach: ask the user, then restart it with access and continue.
     void AddAccessCard(List<HintTag> requests)
     {
-        bool IsEdit(HintTag r) => (r.Get("mode") ?? r.Get("access") ?? "").Trim().ToLowerInvariant() is "edit" or "write" or "change";
-        var edits = requests.Where(IsEdit).ToList();
-        var reads = requests.Except(edits).ToList();
+        string Mode(HintTag r) => (r.Get("mode") ?? r.Get("access") ?? "").Trim().ToLowerInvariant();
+        var spaces = requests.Where(r => Mode(r) is "workspace" or "project" or "repo").ToList();
+        var edits = requests.Where(r => Mode(r) is "edit" or "write" or "change").ToList();
+        var reads = requests.Except(edits).Except(spaces).ToList();
+        if (spaces.Count > 0) WorkspaceCard(spaces);
         if (reads.Count > 0) AccessCard(reads, edit: false);
         if (edits.Count > 0) AccessCard(edits, edit: true);
+    }
+
+    /// The agent found what this session is about (a repo, a project folder): offer to make it the session's workspace.
+    void WorkspaceCard(List<HintTag> requests)
+    {
+        var paths = new List<string>();
+        foreach (var r in requests)
+        {
+            var raw = r.Get("path");
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            string p;
+            try { p = System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(raw.Trim().Trim('"')).Replace('/', '\\')).TrimEnd('\\'); }
+            catch { continue; }
+            if ((System.IO.Directory.Exists(p) || System.IO.File.Exists(p)) && !paths.Contains(p, StringComparer.OrdinalIgnoreCase)) paths.Add(p);
+        }
+        if (paths.Count == 0) return;
+        var reason = requests.Select(r => r.Get("reason")).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        var body = string.Join("\n", paths.Select(p => (System.IO.Directory.Exists(p) ? "📁 " : "📄 ") + p))
+                 + (reason != null ? $"\n\nWhy: {reason}" : "")
+                 + "\n\nThis session will focus its work there: it can read and edit files in it (every change pops up with Undo).";
+        var card = Card($"Make {(paths.Count == 1 ? "this" : "these")} the session's workspace?", body);
+        var buttons = (StackPanel)((StackPanel)card.Child).Children[2];
+        void Accept(bool edit)
+        {
+            foreach (var p in paths) WorkspaceAdded?.Invoke(p, edit);
+            Resolve(card, edit ? "Workspace added." : "Workspace added (read-only).");
+            var note = $"[Computah] The user made these this session's workspace{(edit ? " (you can read and edit them)" : " (read-only)")}:\n" +
+                       string.Join("\n", paths.Select(p => "- " + p)) + "\nContinue with what they asked.";
+            Dispatch(new List<object> { new { type = "text", text = note } }, "", "Computah: workspace added");
+        }
+        buttons.Children.Add(CardButton("Add workspace", true, () => Accept(true)));
+        buttons.Children.Add(CardButton("Read-only", false, () => Accept(false)));
+        buttons.Children.Add(CardButton("Not now", false, () =>
+        {
+            Resolve(card, "Not added.");
+            pendingReport = "[Computah] The user did not make " + string.Join(", ", paths) + " a workspace. Don't propose it again unless they bring it up.";
+        }));
+        Messages.Children.Add(card);
+        Scroller.ScrollToEnd();
+        ShowBubble(activate: true);
     }
 
     void AccessCard(List<HintTag> requests, bool edit)
@@ -600,7 +658,7 @@ public partial class BubbleWindow : Window
             try { p = System.IO.Path.GetFullPath(p).TrimEnd('\\'); } catch { missing.Add(raw); continue; }
             if (p.Length == 2) p += "\\"; // a drive root
             if (!System.IO.Directory.Exists(p) && !System.IO.File.Exists(p)) { missing.Add(raw); continue; }
-            if (edit ? SharedAccess.CanEdit(sharedPaths, p) : SharedAccess.CanRead(sharedPaths, p)) continue; // already has it
+            if (edit ? SharedAccess.CanEdit(Access(), p) : SharedAccess.CanRead(Access(), p)) continue; // already has it
             if (!paths.Contains(p, StringComparer.OrdinalIgnoreCase)) paths.Add(p);
         }
         if (paths.Count == 0)
@@ -669,7 +727,7 @@ public partial class BubbleWindow : Window
         await Task.Delay(150);
 
         ActionRunner.Result res;
-        try { res = await ActionRunner.RunAsync(acts, lastScreen, lastTarget, FlashPointer); }
+        try { res = await ActionRunner.RunAsync(acts, lastScreen, lastTarget, FlashPointer, FocusPlayground); }
         catch (Exception ex) { res = new ActionRunner.Result(false, "an error: " + ex.Message, new List<string>()); }
         CommandLog.Actions(LogName?.Invoke() ?? "session", Settings.Load().Control, acts.Select(ActionRunner.Describe),
             res.Stopped == null ? "completed" : $"stopped after {res.Done.Count} of {acts.Count}: {res.Stopped}");
@@ -717,6 +775,22 @@ public partial class BubbleWindow : Window
         }
         if (shot != null) focusAfterTurn = true; // the agent looks and replies: focus once that loop ends
         Changed?.Invoke();
+    }
+
+    /// &lt;action type="focus" playground="N"/&gt; (or title="..."): bring that playground's window and tab to the front.
+    async Task<string?> FocusPlayground(HintTag a)
+    {
+        var list = Record?.Playgrounds;
+        if (list == null || list.Count == 0) return "this session has no playgrounds";
+        Playground? pg = null;
+        if (int.TryParse(a.Get("playground")?.Trim(), out var n) && n >= 1 && n <= list.Count) pg = list[n - 1];
+        var want = a.Get("title") ?? a.Get("playground");
+        pg ??= want == null ? null : list.FirstOrDefault(p => p.Title.Contains(want, StringComparison.OrdinalIgnoreCase) ||
+                                                             p.Label.Contains(want, StringComparison.OrdinalIgnoreCase));
+        if (pg == null) return $"no playground \"{want}\" (there are {list.Count})";
+        var err = await Playgrounds.FocusAsync(pg);
+        if (pg.Window != 0) lastTarget = (IntPtr)pg.Window; // keyboard actions now go there
+        return err;
     }
 
     bool focusAfterTurn; // set while an action loop runs: when it ends, bring the chat back to the keyboard
@@ -796,6 +870,46 @@ public partial class BubbleWindow : Window
         sp.Children.RemoveAt(2);
         ((TextBlock)sp.Children[1]).Margin = new Thickness(0, 4, 0, 4);
         sp.Children.Add(new TextBlock { Text = outcome, Foreground = Frozen(Color.FromRgb(0x5C, 0xE1, 0xFF)), FontSize = 12 });
+    }
+
+    /// The session this bubble belongs to (set by the app): its workspaces and playgrounds show under the header.
+    public SessionRecord? Record;
+    /// The user removed or changed a workspace/playground from the strip.
+    public event Action? SetupChanged;
+
+    public void RefreshSetup()
+    {
+        SetupStrip.Children.Clear();
+        var s = Record;
+        if (s == null) { SetupStrip.Visibility = Visibility.Collapsed; return; }
+        foreach (var w in s.Workspaces)
+        {
+            var ws = w;
+            var chip = SessionsPanel.Chip(ws.IsFolder ? "" : "", ws.Name + (ws.Edit ? "  ✎" : ""), SessionsPanel.Folder,
+                $"Workspace: {ws.Path}\n{(ws.Edit ? "The agent can read and edit it." : "Read-only.")}\nClick to open · right-click for options");
+            chip.Cursor = Cursors.Hand;
+            chip.MouseLeftButtonUp += (_, _) => { try { System.Diagnostics.Process.Start("explorer.exe", $"\"{ws.Path}\""); } catch { } };
+            chip.ContextMenu = SessionsPanel.Menu(
+                (ws.Edit ? "Make read-only" : "Allow edits", () => { ws.Edit = !ws.Edit; SetupChanged?.Invoke(); }),
+                ("Remove workspace", () => { s.Workspaces.Remove(ws); SetupChanged?.Invoke(); }));
+            SetupStrip.Children.Add(chip);
+        }
+        foreach (var p in s.Playgrounds)
+        {
+            var pg = p;
+            var chip = SessionsPanel.Chip(pg.IsBrowser ? "" : "", pg.Label, SessionsPanel.Accent,
+                $"Playground: {pg.Process}{(pg.Url != null ? " · " + pg.Url : "")}\n{pg.Title}\nRight-click to remove");
+            chip.ContextMenu = SessionsPanel.Menu(("Remove playground", () => { s.Playgrounds.Remove(pg); SetupChanged?.Invoke(); }));
+            SetupStrip.Children.Add(chip);
+        }
+        SetupStrip.Visibility = SetupStrip.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// A small note in the conversation from Computah (not sent to the agent).
+    public void Notice(string text)
+    {
+        Expand();
+        AddNote(text);
     }
 
     void AddNote(string text)

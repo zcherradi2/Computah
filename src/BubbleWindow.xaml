@@ -112,6 +112,9 @@
                     </Button>
                 </Grid>
 
+                <!-- the session's workspaces and playgrounds -->
+                <WrapPanel x:Name="SetupStrip" Grid.Row="1" Margin="14,0,10,2" Visibility="Collapsed"/>
+
                 <!-- conversation (hidden until the first message is sent) -->
                 <ScrollViewer x:Name="Scroller" Grid.Row="2" MaxHeight="440" Padding="16,2,8,0" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"

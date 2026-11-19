@@ -16,7 +16,7 @@ public partial class SessionsPanel : Window
 {
     static readonly Brush Fg = Frozen(Color.FromRgb(0xEC, 0xEC, 0xEE));
     static readonly Brush Muted = Frozen(Color.FromRgb(0x8C, 0x8C, 0x96));
-    static readonly Brush Accent = Frozen(Color.FromRgb(0x5C, 0xE1, 0xFF));
+    internal static readonly Brush Accent = Frozen(Color.FromRgb(0x5C, 0xE1, 0xFF));
     static readonly Brush RowHover = Frozen(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF));
     static readonly Brush RowTarget = Frozen(Color.FromArgb(0x1C, 0x5C, 0xE1, 0xFF));
     static readonly Brush TargetBorder = Frozen(Color.FromArgb(0x70, 0x5C, 0xE1, 0xFF));
@@ -32,6 +32,9 @@ public partial class SessionsPanel : Window
     public event Action<SessionRecord>? DeleteRequested;
     public event Action<SessionRecord, string>? RenameRequested;
     public event Action? NewRequested;
+    /// A session's workspaces or playgrounds were changed here (save it).
+    public event Action<SessionRecord>? SessionChanged;
+    bool dialogOpen; // a folder picker is up: don't close on losing focus
 
     public SessionsPanel(SessionStore store, DockWindow dock)
     {
@@ -46,7 +49,7 @@ public partial class SessionsPanel : Window
             Place();
             BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(110)));
         };
-        Deactivated += (_, _) => SafeClose();
+        Deactivated += (_, _) => { if (!dialogOpen) SafeClose(); };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) SafeClose(); };
     }
 
@@ -105,6 +108,7 @@ public partial class SessionsPanel : Window
         var text = new StackPanel();
         text.Children.Add(titleLine);
         text.Children.Add(meta);
+        text.Children.Add(MakeChips(s));
 
         var openBtn = IconButton("", "Continue (opens the bubble)", () => OpenRequested?.Invoke(s));
         var renameBtn = IconButton("", "Rename", () => BeginRename(s, titleLine, title));
@@ -135,6 +139,82 @@ public partial class SessionsPanel : Window
             else FocusRequested?.Invoke(s);
         };
         return row;
+    }
+
+    static readonly Brush ChipBg = Frozen(Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF));
+    static readonly Brush ChipBorder = Frozen(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF));
+    internal static readonly Brush Folder = Frozen(Color.FromRgb(0xF2, 0xC2, 0x4B));
+
+    /// Workspaces (folders/files it works on) and playgrounds (windows it works in) as small chips; right-click to manage.
+    FrameworkElement MakeChips(SessionRecord s)
+    {
+        var wrap = new WrapPanel { Margin = new Thickness(0, 5, 0, 0) };
+        foreach (var w in s.Workspaces)
+        {
+            bool exists = System.IO.Directory.Exists(w.Path) || System.IO.File.Exists(w.Path);
+            var chip = Chip(w.IsFolder || !exists ? "\uE8B7" : "\uE8A5", w.Name + (w.Edit ? "  \u270E" : ""), Folder,
+                $"Workspace: {w.Path}\n{(w.Edit ? "The agent can read and edit it." : "Read-only.")}{(exists ? "" : "\n(not found)")}\nRight-click for options");
+            if (!exists) chip.Opacity = 0.5;
+            chip.ContextMenu = Menu(
+                (w.Edit ? "Make read-only" : "Allow edits", () => { w.Edit = !w.Edit; SessionChanged?.Invoke(s); }),
+                ("Show in File Explorer", () => { try { System.Diagnostics.Process.Start("explorer.exe", $"\"{w.Path}\""); } catch { } }),
+                ("Remove workspace", () => { s.Workspaces.Remove(w); SessionChanged?.Invoke(s); }));
+            wrap.Children.Add(chip);
+        }
+        foreach (var p in s.Playgrounds)
+        {
+            var chip = Chip(p.IsBrowser ? "\uE774" : "\uE737", p.Label, Accent,
+                $"Playground: {p.Process}{(p.Url != null ? " \u00B7 " + p.Url : "")}\n{p.Title}\nRight-click to remove");
+            chip.ContextMenu = Menu(("Remove playground", () => { s.Playgrounds.Remove(p); SessionChanged?.Invoke(s); }));
+            wrap.Children.Add(chip);
+        }
+        var add = Chip("\uE710", "folder", Muted, "Add a workspace folder");
+        add.Opacity = 0.7;
+        add.MouseLeftButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            dialogOpen = true;
+            try
+            {
+                using var dlg = new WF.FolderBrowserDialog { Description = $"Workspace for \u201C{s.Title}\u201D", UseDescriptionForTitle = true };
+                if (dlg.ShowDialog() == WF.DialogResult.OK && s.AddWorkspace(dlg.SelectedPath)) SessionChanged?.Invoke(s);
+            }
+            finally { dialogOpen = false; }
+        };
+        add.PreviewMouseLeftButtonDown += (_, e) => e.Handled = true; // not a row click
+        wrap.Children.Add(add);
+        return wrap;
+    }
+
+    internal static Border Chip(string glyph, string label, Brush iconBrush, string tip)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        sp.Children.Add(new TextBlock { Text = glyph, FontFamily = Icons, FontSize = 10.5, Foreground = iconBrush, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 5, 0) });
+        sp.Children.Add(new TextBlock { Text = label.Length > 28 ? label[..26] + "\u2026" : label, Foreground = Fg, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Center });
+        var b = new Border
+        {
+            Child = sp, Background = ChipBg, BorderBrush = ChipBorder, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(6, 1, 7, 2), Margin = new Thickness(0, 0, 4, 4), ToolTip = tip, Cursor = Cursors.Arrow,
+        };
+        b.MouseEnter += (_, _) => b.BorderBrush = Accent;
+        b.MouseLeave += (_, _) => b.BorderBrush = ChipBorder;
+        b.MouseLeftButtonDown += (_, e) => { if (e.ClickCount == 2) e.Handled = true; }; // not "open the session"
+        return b;
+    }
+
+    internal static ContextMenu Menu(params (string Text, Action Do)[] items)
+    {
+        var m = new ContextMenu
+        {
+            Background = Frozen(Color.FromRgb(0x26, 0x26, 0x2C)), Foreground = Fg, BorderBrush = ChipBorder,
+        };
+        foreach (var (text, act) in items)
+        {
+            var mi = new MenuItem { Header = text, Foreground = Fg, Background = Brushes.Transparent };
+            mi.Click += (_, _) => act();
+            m.Items.Add(mi);
+        }
+        return m;
     }
 
     /// Swap the title for an inline text box. Enter or clicking away saves, Esc cancels.
