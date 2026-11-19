@@ -23,6 +23,8 @@ sealed class AgentSession : IDisposable
     public event Action<string>? Text;          // background thread
     public event Action<string>? Status;        // background thread
     public event Action<bool, string?>? TurnDone; // (isError, message) background thread
+    /// A tool call the agent made: (tool name, the command / path / query it ran with). Background thread.
+    public event Action<string, string>? ToolUsed;
 
     /// `refreshInstructions`: resuming after the instructions changed (e.g. control was just allowed);
     /// agents without a system-prompt flag then get the new instructions with the next message.
@@ -138,6 +140,16 @@ sealed class AgentSession : IDisposable
                 }
                 break;
 
+            case "assistant":
+                if (r.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+                    foreach (var block in content.EnumerateArray())
+                        if (Str(block, "type") is "tool_use" or "server_tool_use")
+                        {
+                            var name = Str(block, "name") ?? "tool";
+                            ToolUsed?.Invoke(name, ToolDetail(name, block.TryGetProperty("input", out var inp) ? inp : default));
+                        }
+                break;
+
             case "result":
                 inTurn = false;
                 bool isErr = r.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
@@ -163,6 +175,17 @@ sealed class AgentSession : IDisposable
         null => "Working…",
         _ => $"Using {name}…",
     };
+
+    /// The interesting part of a tool call's input: the shell command, file path, search, URL…
+    static string ToolDetail(string name, JsonElement input)
+    {
+        if (input.ValueKind != JsonValueKind.Object) return name;
+        foreach (var key in new[] { "command", "file_path", "notebook_path", "url", "query", "pattern", "path", "description", "prompt" })
+            if (Str(input, key) is { Length: > 0 } v)
+                return key == "pattern" && Str(input, "path") is { Length: > 0 } where ? $"{v}  in  {where}" : v;
+        var raw = input.GetRawText();
+        return raw.Length > 2000 ? raw[..2000] + "…" : raw;
+    }
 
     static string? Str(JsonElement e, string p) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

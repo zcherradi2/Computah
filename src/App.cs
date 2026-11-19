@@ -221,6 +221,8 @@ sealed class AssistHost : IDisposable
             MaybeNameSession(rec, agent);
         };
         w.UserFocused += () => { if (store.FocusedId != rec.Id) SetFocused(rec); };
+        w.ToolUsed += (tool, detail) => dock?.ShowCommand(rec, tool, detail);
+        w.TurnFinished += () => dock?.CommandsDone(rec);
         w.Closed += (_, _) =>
         {
             rec.Window = null;

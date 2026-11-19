@@ -51,17 +51,36 @@ public partial class DockWindow : Window
                 Leave = () => { Zoom(1.0); DropGlow(false); fan?.Highlight(null); fanHide.Start(); },
                 Drop = (files, _) => { HideFan(); FilesDropped?.Invoke(files, null, false); },
             });
-        Closed += (_, _) => { FileDropTarget.Unregister(new WindowInteropHelper(this).Handle); HideFan(); };
+        Closed += (_, _) => { FileDropTarget.Unregister(new WindowInteropHelper(this).Handle); HideFan(); commands?.Close(); };
         fanHide.Tick += (_, _) => HideFan();
     }
 
     FileDropTarget? dropTarget; // kept alive while registered
+
+    CommandFan? commands;
+
+    /// The agent ran a command/tool: show it as a ghost tag above the button.
+    public void ShowCommand(SessionRecord rec, string tool, string detail)
+    {
+        if (commands == null)
+        {
+            commands = new CommandFan(this);
+            var mine = commands;
+            commands.Closed += (_, _) => { if (commands == mine) commands = null; };
+            if (fan != null) commands.Visibility = Visibility.Hidden;
+            commands.Show();
+        }
+        commands.Add(rec, tool, detail);
+    }
+
+    public void CommandsDone(SessionRecord rec) => commands?.Done(rec);
 
     /// Session tags above the button while files are dragged over it.
     void ShowFan()
     {
         fanHide.Stop();
         if (fan != null) return;
+        if (commands != null) commands.Visibility = Visibility.Hidden; // the session tags take that spot
         fan = new DropFan(this, store);
         fan.DragEntered += () => fanHide.Stop();
         fan.DragLeft += () => fanHide.Start();
@@ -79,6 +98,7 @@ public partial class DockWindow : Window
         var f = fan;
         fan = null;
         f?.Close();
+        if (commands != null) commands.Visibility = Visibility.Visible;
     }
 
     void DropGlow(bool on)
@@ -134,6 +154,7 @@ public partial class DockWindow : Window
         {
             store.DockX = after.Left; store.DockY = after.Top;
             store.Save();
+            commands?.Place();
         }
     }
 

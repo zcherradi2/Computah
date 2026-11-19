@@ -76,6 +76,10 @@ public partial class BubbleWindow : Window
     public event Action? Changed;
     /// The user clicked into this bubble.
     public event Action? UserFocused;
+    /// The agent ran a tool: (tool name, command/path/query). UI thread.
+    public event Action<string, string>? ToolUsed;
+    /// The agent finished answering (UI thread).
+    public event Action? TurnFinished;
 
     // Files/folders shared with this session (the SessionRecord's list), and what the running agent was started with.
     readonly List<string> sharedPaths;
@@ -168,6 +172,7 @@ public partial class BubbleWindow : Window
             });
         };
         session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
+        session.ToolUsed += (name, detail) => Dispatcher.BeginInvoke(() => ToolUsed?.Invoke(name, detail));
         session.TurnDone += (err, msg) =>
         {
             var rest = hintFilter.Flush();
@@ -176,6 +181,7 @@ public partial class BubbleWindow : Window
             {
                 doneInfo = (err, msg);
                 turnDonePending = true;
+                TurnFinished?.Invoke();
             });
         };
     }
