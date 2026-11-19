@@ -55,14 +55,21 @@ public sealed class CapturedContext
         sb.AppendLine($"  ProcessName: {ProcessName}");
         sb.AppendLine($"  WindowTitle: {WindowTitle}");
         sb.AppendLine($"  Path: {(ProcessPath.Length > 0 ? ProcessPath : "unknown")}");
+        sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor " +
+                      $"(monitor origin {Monitor.X}, {Monitor.Y} in virtual-screen coordinates).");
         if (IncludeScreen)
         {
-            sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor.");
             sb.AppendLine($"Image {n++}: the whole monitor scaled to {FullW}x{FullH}; pointer at ({FullCursorX}, {FullCursorY}), marked with a red circle.");
             if (CropJpeg != null)
                 sb.AppendLine($"Image {n++}: full-resolution {CropW}x{CropH} crop around the pointer; pointer at ({CropCursorX}, {CropCursorY}), red circle.");
-            sb.AppendLine($"Full-resolution screenshot file: {ScreenshotPath}");
         }
+
+        var withheld = new List<string>();
+        if (!IncludeScreen) withheld.Add("screenshot");
+        if (!IncludeSelection && SelectedText != null) withheld.Add("selected text");
+        if (!IncludeClipboard && HasClipboard) withheld.Add("clipboard");
+        if (withheld.Count > 0)
+            sb.AppendLine($"The user chose NOT to share: {string.Join(", ", withheld)}. Do not try to obtain it any other way.");
 
         bool sel = IncludeSelection && SelectedText != null;
         bool clip = IncludeClipboard;

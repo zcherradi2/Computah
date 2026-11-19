@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ClaudeAssist")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7fb67e15a83c62ee6ee9fed6c60606ff5c2ed600")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7111038226de1b7a30c0e64b1f322823c55b03bd")]
 [assembly: System.Reflection.AssemblyProductAttribute("ClaudeAssist")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ClaudeAssist")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

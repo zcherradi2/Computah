@@ -31,7 +31,7 @@ sealed class ClaudeSession : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            WorkingDirectory = Paths.Root,
+            WorkingDirectory = Paths.Workspace,
             StandardOutputEncoding = new UTF8Encoding(false),
             StandardErrorEncoding = new UTF8Encoding(false),
             StandardInputEncoding = new UTF8Encoding(false),
@@ -43,6 +43,9 @@ sealed class ClaudeSession : IDisposable
         if (!string.IsNullOrWhiteSpace(s.SystemPrompt)) { psi.ArgumentList.Add("--append-system-prompt"); psi.ArgumentList.Add(s.SystemPrompt); }
         if (!string.IsNullOrWhiteSpace(s.AllowedTools)) { psi.ArgumentList.Add("--allowedTools"); psi.ArgumentList.Add(s.AllowedTools); }
         if (!s.LoadMcpServers) psi.ArgumentList.Add("--strict-mcp-config");
+        // Belt and braces: never let Claude open the saved screenshots on its own.
+        psi.ArgumentList.Add("--disallowedTools");
+        psi.ArgumentList.Add($"Read({Paths.Screenshots.Replace('\\', '/')}/**)");
 
         // Don't let a parent Claude Code session's env leak in.
         psi.Environment.Remove("CLAUDECODE");

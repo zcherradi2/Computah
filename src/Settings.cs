@@ -14,6 +14,18 @@ static class Paths
             ? d : AppContext.BaseDirectory;
 
     public static string Screenshots => Path.Combine(Root, "screenshots");
+
+    /// Empty folder Claude runs in: outside any git repo and away from the screenshots,
+    /// so Claude can only see what the user actually attaches.
+    public static string Workspace
+    {
+        get
+        {
+            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeAssist", "workspace");
+            Directory.CreateDirectory(d);
+            return d;
+        }
+    }
     public static string SettingsFile => Path.Combine(Root, "settings.json");
     public static string LogFile => Path.Combine(Root, "assist.log");
 
