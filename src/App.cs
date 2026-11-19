@@ -81,6 +81,15 @@ sealed class AssistHost : IDisposable
         showDock.CheckedChanged += (_, _) => { var s = Settings.Load(); s.ShowDock = showDock.Checked; s.Save(); SetDockVisible(showDock.Checked); };
         menu.Items.Add(showDock);
         menu.Items.Add("Open screenshots folder", null, (_, _) => Shell(Paths.Screenshots, true));
+        menu.Items.Add("Command log", null, (_, _) =>
+        {
+            if (!File.Exists(CommandLog.File))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(CommandLog.File)!);
+                File.WriteAllText(CommandLog.File, "Computah command log: every command the agents ran and every mouse/keyboard action, with the session and its permissions.\n\n");
+            }
+            Shell(CommandLog.File, false);
+        });
         menu.Items.Add("Edit settings", null, (_, _) => { Settings.Load(); Shell(Paths.SettingsFile, false); });
         var startup = new WF.ToolStripMenuItem("Start with Windows") { Checked = IsStartupEnabled(), CheckOnClick = true };
         startup.CheckedChanged += (_, _) => SetStartup(startup.Checked);
@@ -211,6 +220,7 @@ sealed class AssistHost : IDisposable
     {
         var w = new BubbleWindow(settings, agent, rec.AgentSessionId, rec.History, rec.SharedPaths);
         rec.Window = w;
+        w.LogName = () => $"\"{rec.Title}\" (session {rec.Id[..8]})";
         w.Changed += () =>
         {
             rec.History = w.History.ToList();

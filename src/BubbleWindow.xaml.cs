@@ -78,6 +78,8 @@ public partial class BubbleWindow : Window
     public event Action? UserFocused;
     /// The agent ran a tool: (tool name, command/path/query). UI thread.
     public event Action<string, string>? ToolUsed;
+    /// How this conversation is named in the command log.
+    public Func<string>? LogName;
     /// The agent finished answering (UI thread).
     public event Action? TurnFinished;
 
@@ -156,7 +158,7 @@ public partial class BubbleWindow : Window
     void StartSession(string? resume = null, bool refreshInstructions = false)
     {
         var paths = sharedPaths.ToList();
-        session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions, paths);
+        session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions, paths) { LogName = () => LogName?.Invoke() ?? "session" };
         startedPaths = string.Join("|", paths);
         session.Text += t =>
         {
@@ -590,6 +592,8 @@ public partial class BubbleWindow : Window
         ActionRunner.Result res;
         try { res = await ActionRunner.RunAsync(acts, lastScreen, lastTarget, FlashPointer); }
         catch (Exception ex) { res = new ActionRunner.Result(false, "an error: " + ex.Message, new List<string>()); }
+        CommandLog.Actions(LogName?.Invoke() ?? "session", Settings.Load().Control, acts.Select(ActionRunner.Describe),
+            res.Stopped == null ? "completed" : $"stopped after {res.Done.Count} of {acts.Count}: {res.Stopped}");
 
         CapturedContext? shot = null;
         if (res.Stopped == null && res.Look && autoTurns < 10 && !closed)

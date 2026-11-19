@@ -26,6 +26,13 @@ sealed class AgentSession : IDisposable
     /// A tool call the agent made: (tool name, the command / path / query it ran with). Background thread.
     public event Action<string, string>? ToolUsed;
 
+    /// Which conversation this is, for the command log ("title (id)").
+    public Func<string>? LogName;
+    readonly string agentName = "", permissions = "";
+    string? reportedMode; // from the agent's own startup message
+    string Permissions => reportedMode == null ? permissions : permissions + "\n" + reportedMode;
+    string Who => LogName?.Invoke() ?? SessionId ?? "new session";
+
     /// `refreshInstructions`: resuming after the instructions changed (e.g. control was just allowed);
     /// agents without a system-prompt flag then get the new instructions with the next message.
     public AgentSession(Settings s, AgentInfo agent, string? resumeId, bool refreshInstructions, IReadOnlyList<string> sharedPaths)
@@ -51,7 +58,10 @@ sealed class AgentSession : IDisposable
             StandardErrorEncoding = new UTF8Encoding(false),
             StandardInputEncoding = new UTF8Encoding(false),
         };
-        foreach (var a in agent.Args(s, resumeId, sharedPaths)) psi.ArgumentList.Add(a);
+        var args = agent.Args(s, resumeId, sharedPaths);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        agentName = agent.Name;
+        permissions = CommandLog.DescribePermissions(s, agent, args);
 
         // Don't let a parent Claude Code session's env leak in.
         psi.Environment.Remove("CLAUDECODE");
@@ -116,7 +126,11 @@ sealed class AgentSession : IDisposable
         switch (Str(r, "type"))
         {
             case "system":
-                if (Str(r, "subtype") == "init") SessionId = Str(r, "session_id");
+                if (Str(r, "subtype") == "init")
+                {
+                    SessionId = Str(r, "session_id");
+                    if (Str(r, "permissionMode") is { } pm) reportedMode = $"{agentName} permission mode: {CommandLog.ExplainMode(pm)}";
+                }
                 break;
 
             case "stream_event":
@@ -146,8 +160,19 @@ sealed class AgentSession : IDisposable
                         if (Str(block, "type") is "tool_use" or "server_tool_use")
                         {
                             var name = Str(block, "name") ?? "tool";
-                            ToolUsed?.Invoke(name, ToolDetail(name, block.TryGetProperty("input", out var inp) ? inp : default));
+                            var input = block.TryGetProperty("input", out var inp) ? inp : default;
+                            var detail = ToolDetail(name, input);
+                            CommandLog.ToolCall(Who, agentName, Permissions, name, FullDetail(name, input, detail), Str(block, "id"));
+                            ToolUsed?.Invoke(name, detail);
                         }
+                break;
+
+            case "user": // tool results come back as a user message
+                if (r.TryGetProperty("message", out var um) && um.TryGetProperty("content", out var uc) && uc.ValueKind == JsonValueKind.Array)
+                    foreach (var block in uc.EnumerateArray())
+                        if (Str(block, "type") == "tool_result")
+                            CommandLog.ToolResult(Who, Str(block, "tool_use_id"),
+                                block.TryGetProperty("is_error", out var e) && e.ValueKind == JsonValueKind.True, ResultText(block));
                 break;
 
             case "result":
@@ -185,6 +210,27 @@ sealed class AgentSession : IDisposable
                 return key == "pattern" && Str(input, "path") is { Length: > 0 } where ? $"{v}  in  {where}" : v;
         var raw = input.GetRawText();
         return raw.Length > 2000 ? raw[..2000] + "…" : raw;
+    }
+
+    /// For the log: the whole input when there is more to it than the headline (e.g. an edit's old/new text).
+    static string FullDetail(string name, JsonElement input, string headline)
+    {
+        if (input.ValueKind != JsonValueKind.Object) return headline;
+        var extra = input.EnumerateObject()
+            .Where(p => p.Value.ValueKind != JsonValueKind.String || p.Value.GetString() != headline)
+            .Select(p => $"{p.Name} = {(p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() : p.Value.GetRawText())}")
+            .ToList();
+        var all = extra.Count == 0 ? headline : headline + "\n" + string.Join("\n", extra);
+        return all.Length > 6000 ? all[..6000] + "â€¦" : all;
+    }
+
+    static string ResultText(JsonElement block)
+    {
+        if (!block.TryGetProperty("content", out var c)) return "";
+        if (c.ValueKind == JsonValueKind.String) return c.GetString() ?? "";
+        if (c.ValueKind == JsonValueKind.Array)
+            return string.Join("\n", c.EnumerateArray().Select(x => Str(x, "text") ?? (Str(x, "type") == "image" ? "[image]" : "")).Where(x => x.Length > 0));
+        return "";
     }
 
     static string? Str(JsonElement e, string p) =>
