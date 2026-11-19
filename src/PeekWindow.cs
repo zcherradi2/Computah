@@ -46,6 +46,8 @@ public sealed class PeekWindow : Window
     readonly Stack<Target> back = new();
     Target current;
     readonly string? label;
+    object? owner;          // the conversation that opened it
+    Target opened = null!;  // what the agent originally showed (the user may have navigated since)
 
     readonly TextBlock title = new() { Foreground = Fg, FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     readonly TextBlock pathText = new() { Foreground = Muted, FontFamily = Mono, FontSize = 11.5, TextTrimming = TextTrimming.CharacterEllipsis, Cursor = Cursors.Hand };
@@ -61,7 +63,7 @@ public sealed class PeekWindow : Window
     Rect compactBounds;
 
     /// Show a `file` or `folder` hint. Returns false when the path doesn't exist.
-    public static bool Show(HintTag t, Rect workAreaDips)
+    public static bool Show(HintTag t, Rect workAreaDips, object? owner = null)
     {
         var raw = t.Get("path") ?? t.Get("file") ?? t.Get("folder");
         if (string.IsNullOrWhiteSpace(raw)) return false;
@@ -82,11 +84,81 @@ public sealed class PeekWindow : Window
         // the same file already open: just move to the new spot
         var same = Open.FirstOrDefault(w => string.Equals(w.current.Path, path, StringComparison.OrdinalIgnoreCase));
         var target = new Target(path, line, col, endLine, endCol, select);
-        if (same != null) { same.back.Clear(); same.Load(target); same.Pop(); return true; }
+        if (same != null) { same.back.Clear(); same.owner = owner ?? same.owner; same.opened = target; same.Load(target); same.Pop(); return true; }
 
-        var w = new PeekWindow(target, t.Label, workAreaDips);
+        var w = new PeekWindow(target, t.Label, workAreaDips) { owner = owner };
         w.Show();
         return true;
+    }
+
+    static readonly List<string> RecentlyClosed = new();
+
+    /// What's open on screen right now, for the agent: each card's file/folder, the highlighted spot, the part in view,
+    /// and what the user selected in it. Also cards closed since the last call. Null when there's nothing to say.
+    public static string? DescribeOpen(object? asker)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var w in Open.Where(w => w.IsVisible))
+            sb.Append("- ").Append(w.Describe(asker)).Append('\n');
+        List<string> closed;
+        lock (RecentlyClosed) { closed = RecentlyClosed.Distinct(StringComparer.OrdinalIgnoreCase).ToList(); RecentlyClosed.Clear(); }
+        closed.RemoveAll(c => Open.Any(w => string.Equals(w.current.Path, c, StringComparison.OrdinalIgnoreCase)));
+        if (sb.Length == 0 && closed.Count == 0) return null;
+
+        var text = "";
+        if (sb.Length > 0)
+            text = "[Computah] File/folder cards open on the user's screen right now (\"this file\", \"that folder\", \"here\", " +
+                   "\"the selected line\" most likely mean these):\n" + sb;
+        if (closed.Count > 0)
+            text += (text.Length > 0 ? "" : "[Computah] ") + "Cards the user closed since their last message: " + string.Join(", ", closed) + "\n";
+        return text.TrimEnd();
+    }
+
+    string Describe(object? asker)
+    {
+        var parts = new List<string>();
+        bool folder = Directory.Exists(current.Path);
+        parts.Add($"{(folder ? "Folder" : "File")} card: {current.Path}");
+        if (!string.Equals(opened.Path, current.Path, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"the user navigated here from {opened.Path}");
+        if (owner != null && asker != null && !ReferenceEquals(owner, asker)) parts.Add("opened in another conversation");
+
+        if (editor != null)
+        {
+            var doc = editor.Document;
+            if (highlighter != null)
+            {
+                var a = doc.GetLocation(highlighter.Start);
+                var b = doc.GetLocation(Math.Max(highlighter.Start, highlighter.End - 1));
+                parts.Add(highlighter.Line == highlighter.EndLine && current.Col == 0 ? $"highlighted line {highlighter.Line}"
+                        : current.Col == 0 ? $"highlighted lines {highlighter.Line}-{highlighter.EndLine}"
+                        : $"highlighted line {a.Line} char {a.Column} to line {b.Line} char {b.Column}");
+            }
+            var tv = editor.TextArea.TextView;
+            try
+            {
+                tv.EnsureVisualLines();
+                if (tv.VisualLinesValid && tv.VisualLines.Count > 0)
+                    parts.Add($"lines {tv.VisualLines[0].FirstDocumentLine.LineNumber}-{tv.VisualLines[^1].LastDocumentLine.LineNumber} of {doc.LineCount} in view");
+            }
+            catch { }
+            if (editor.SelectionLength > 0)
+            {
+                var a = doc.GetLocation(editor.SelectionStart);
+                var b = doc.GetLocation(editor.SelectionStart + editor.SelectionLength - 1);
+                var sel = editor.SelectedText;
+                if (sel.Length > 1500) sel = sel[..1500] + $"… ({editor.SelectionLength} chars)";
+                parts.Add($"the user SELECTED line {a.Line} char {a.Column} to line {b.Line} char {b.Column}:\n  \"\"\"\n  {sel.Replace("\n", "\n  ")}\n  \"\"\"");
+            }
+        }
+        else if (folder)
+        {
+            if (current.Select.Length > 0) parts.Add("highlighted: " + string.Join(", ", current.Select));
+            if (selectedEntry != null) parts.Add($"the user SELECTED: {Path.GetFileName(selectedEntry)}{(Directory.Exists(selectedEntry) ? " (folder)" : "")}");
+        }
+        else parts.Add("shown as a preview (image or non-text file)");
+        if (expanded) parts.Add("enlarged");
+        return string.Join("; ", parts);
     }
 
     static string? Resolve(string raw)
@@ -103,6 +175,7 @@ public sealed class PeekWindow : Window
     PeekWindow(Target target, string? label, Rect workAreaDips)
     {
         current = target;
+        opened = target;
         this.label = label;
         workArea = workAreaDips;
 
@@ -185,7 +258,11 @@ public sealed class PeekWindow : Window
         Left = workArea.Left + (workArea.Width - w) / 2 + n * 28;
         Top = workArea.Top + workArea.Height * 0.12 + n * 28;
         Open.Add(this);
-        Closed += (_, _) => Open.Remove(this);
+        Closed += (_, _) =>
+        {
+            Open.Remove(this);
+            lock (RecentlyClosed) RecentlyClosed.Add(current.Path);
+        };
 
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { Close(); e.Handled = true; } };
 

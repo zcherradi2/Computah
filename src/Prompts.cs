@@ -49,6 +49,11 @@ static class Prompts
         Images open as a picture preview. Only point to positions you actually read in the file (for example from your
         file-reading tool's line numbers); never guess them. At most 2 cards per reply. Say in a few words what the card
         shows.
+        Cards stay open until the user closes them. With each of their messages Computah lists the cards still open:
+        the path (the user may have moved to another file or folder inside a card), the part in view, and exactly what
+        they SELECTED in it, with line and character positions. When they say "this", "here", "that line" or "the
+        file", it most likely means that selection or those cards. Re-opening a card that is already open just moves it
+        to the new spot.
         """;
 
     const string ControlOff = """

@@ -398,6 +398,7 @@ public partial class BubbleWindow : Window
         Attachments.Children.Clear();
         Attachments.Visibility = Visibility.Collapsed;
         if (pendingReport != null) { body = pendingReport + "\n\n" + body; pendingReport = null; }
+        if (PeekWindow.DescribeOpen(this) is { } cards) body = cards + "\n\n" + body;
         blocks.Add(new { type = "text", text = body });
         Dispatch(blocks, text, attachLine);
     }
@@ -781,7 +782,7 @@ public partial class BubbleWindow : Window
             var dpi = VisualTreeHelper.GetDpi(this);
             var dips = new Rect(wa.Left / dpi.DpiScaleX, wa.Top / dpi.DpiScaleY, wa.Width / dpi.DpiScaleX, wa.Height / dpi.DpiScaleY);
             foreach (var p in peeks.Take(3))
-                if (!PeekWindow.Show(p, dips)) AddNote($"Couldn't find {p.Get("path") ?? "that file"}.");
+                if (!PeekWindow.Show(p, dips, this)) AddNote($"Couldn't find {p.Get("path") ?? "that file"}.");
             hints = hints.Except(peeks).ToList();
             if (hints.Count == 0) return;
         }
