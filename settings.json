@@ -1,5 +1,5 @@
 {
-  "agent": "computah-deepseek",
+  "agent": "claude",
   "models": {
     "claude": "sonnet",
     "qwen": ""
@@ -11,6 +11,8 @@
   "attachClipboard": false,
   "captureSelection": true,
   "sendCursorCrop": true,
+  "sight": "perfect",
+  "sightMode": "perfect",
   "loadMcpServers": false,
   "allowedTools": "",
   "thinking": {}
