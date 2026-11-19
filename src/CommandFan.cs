@@ -227,11 +227,11 @@ public sealed class CommandFan : Window
         {
             try { Clipboard.SetText(detail); ((TextBlock)details.Children[2]).Text = "Copied ✓"; } catch { }
         };
-        // right-click: dismiss all the ghosts
+        // right-click: dismiss just this ghost
         pill.MouseRightButtonUp += (_, e) =>
         {
             e.Handled = true;
-            foreach (var c in cmds.Where(c => !c.Leaving).ToList()) Remove(c);
+            if (!cmd.Leaving) Remove(cmd);
         };
         return cmd;
     }

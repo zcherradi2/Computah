@@ -580,9 +580,11 @@ public sealed class PeekWindow : Window
         DockPanel.SetDock(tabStrip, Dock.Top);
         DockPanel.SetDock(labelBlock, Dock.Top);
         DockPanel.SetDock(foot, Dock.Bottom);
+        DockPanel.SetDock(lifeBar, Dock.Bottom);
         layout.Children.Add(header);
         layout.Children.Add(tabStrip);
         layout.Children.Add(labelBlock);
+        layout.Children.Add(lifeBar);
         layout.Children.Add(foot);
         layout.Children.Add(body);
 
@@ -614,8 +616,15 @@ public sealed class PeekWindow : Window
             lock (RecentlyClosed) RecentlyClosed.Add(current.Path);
         };
 
+        // clicking, scrolling or typing in the card keeps it open
+        PreviewMouseDown += (_, _) => Pin();
+        PreviewMouseWheel += (_, _) => Pin();
+        lifeTimer.Tick += (_, _) => LifeTick();
+        Closed += (_, _) => lifeTimer.Stop();
+
         PreviewKeyDown += (_, e) =>
         {
+            Pin();
             if (e.Key == Key.Escape) { Close(); e.Handled = true; return; }
             if (current.Change == null || Keyboard.Modifiers != ModifierKeys.Control) return;
             if (e.Key == Key.Z) { Undo(); e.Handled = true; }
@@ -904,8 +913,54 @@ public sealed class PeekWindow : Window
         catch (Exception ex) { Paths.Log("peek reveal: " + ex.Message); }
     }
 
+    // ---------- lifetime: cards close by themselves unless the user clicks into them ----------
+
+    static readonly TimeSpan Life = TimeSpan.FromSeconds(15);
+    readonly DispatcherTimer lifeTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    readonly Border lifeBar = new()
+    {
+        Height = 2, CornerRadius = new CornerRadius(1), Margin = new Thickness(2, 6, 2, 0), HorizontalAlignment = HorizontalAlignment.Stretch,
+        Background = Frozen(Color.FromArgb(0x90, 0x5C, 0xE1, 0xFF)), RenderTransformOrigin = new Point(0, 0.5), RenderTransform = new ScaleTransform(1, 1),
+        ToolTip = "Closes by itself unless you click into it",
+    };
+    DateTime expires;
+    bool pinned, closingSoon;
+
+    /// New content shown: (re)start the countdown, unless the user already took the card.
+    void StartLife()
+    {
+        if (pinned) return;
+        expires = DateTime.Now + Life;
+        lifeBar.Visibility = Visibility.Visible;
+        lifeTimer.Start();
+    }
+
+    void Pin()
+    {
+        if (pinned) return;
+        pinned = true;
+        lifeTimer.Stop();
+        lifeBar.Visibility = Visibility.Collapsed;
+    }
+
+    void LifeTick()
+    {
+        if (pinned || closingSoon) return;
+        var now = DateTime.Now;
+        if (IsMouseOver && expires - now < TimeSpan.FromSeconds(3)) expires = now + TimeSpan.FromSeconds(3); // reading it: wait
+        var left = Math.Clamp((expires - now).TotalMilliseconds / Life.TotalMilliseconds, 0, 1);
+        ((ScaleTransform)lifeBar.RenderTransform).ScaleX = left;
+        if (now < expires) return;
+        closingSoon = true;
+        lifeTimer.Stop();
+        var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(250));
+        fade.Completed += (_, _) => Close();
+        ((Border)Content).BeginAnimation(OpacityProperty, fade);
+    }
+
     void Pop()
     {
+        StartLife();
         var card = (Border)Content;
         var sc = (ScaleTransform)card.RenderTransform;
         var ease = new BackEase { Amplitude = 0.25, EasingMode = EasingMode.EaseOut };
