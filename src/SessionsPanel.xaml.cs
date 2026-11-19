@@ -30,6 +30,7 @@ public partial class SessionsPanel : Window
     public event Action<SessionRecord>? FocusRequested;
     public event Action<SessionRecord>? OpenRequested;
     public event Action<SessionRecord>? DeleteRequested;
+    public event Action<SessionRecord, string>? RenameRequested;
     public event Action? NewRequested;
 
     public SessionsPanel(SessionStore store, DockWindow dock)
@@ -106,9 +107,11 @@ public partial class SessionsPanel : Window
         text.Children.Add(meta);
 
         var openBtn = IconButton("", "Continue (opens the bubble)", () => OpenRequested?.Invoke(s));
+        var renameBtn = IconButton("", "Rename", () => BeginRename(s, titleLine, title));
         var delBtn = IconButton("", "Delete session", () => DeleteRequested?.Invoke(s));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) };
         actions.Children.Add(openBtn);
+        actions.Children.Add(renameBtn);
         actions.Children.Add(delBtn);
 
         var grid = new Grid();
@@ -132,6 +135,41 @@ public partial class SessionsPanel : Window
             else FocusRequested?.Invoke(s);
         };
         return row;
+    }
+
+    /// Swap the title for an inline text box. Enter or clicking away saves, Esc cancels.
+    void BeginRename(SessionRecord s, DockPanel titleLine, TextBlock title)
+    {
+        if (!titleLine.Children.Contains(title)) return; // already editing
+        var box = new TextBox
+        {
+            Text = s.Title, Foreground = Fg, CaretBrush = Fg, SelectionBrush = Accent, FontWeight = FontWeights.SemiBold,
+            Background = Frozen(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)), BorderBrush = Accent, BorderThickness = new Thickness(1),
+            Padding = new Thickness(4, 1, 4, 2), MaxLength = 80,
+        };
+        bool done = false;
+        void Finish(bool save)
+        {
+            if (done) return;
+            done = true;
+            var name = box.Text.Trim();
+            if (save && name.Length > 0 && name != s.Title) RenameRequested?.Invoke(s, name);
+            else Refresh();
+        }
+        box.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) { e.Handled = true; Finish(true); }
+            else if (e.Key == Key.Escape) { e.Handled = true; Finish(false); }
+        };
+        box.LostKeyboardFocus += (_, _) => Finish(true);
+        box.MouseDoubleClick += (_, e) => e.Handled = true;
+        box.PreviewMouseLeftButtonDown += (_, e) => e.Handled = false;
+
+        int i = titleLine.Children.IndexOf(title);
+        titleLine.Children.RemoveAt(i);
+        titleLine.Children.Insert(i, box);
+        box.Focus();
+        box.SelectAll();
     }
 
     Button IconButton(string glyph, string tip, Action click)

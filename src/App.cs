@@ -231,7 +231,7 @@ sealed class AssistHost : IDisposable
 
         var userText = user.Text.Length > 0 ? user.Text : $"(shared {user.Attach ?? "their screen"} without typing anything)";
         var title = await Titles.GenerateAsync(agent, userText, answer.Text);
-        if (title == null || !store.Sessions.Contains(rec)) return;
+        if (title == null || rec.Name != null || !store.Sessions.Contains(rec)) return; // renamed meanwhile
         rec.Name = title;
         store.Save();
         RefreshUi();
@@ -304,6 +304,13 @@ sealed class AssistHost : IDisposable
             store.Remove(rec);
             store.Save();
             w?.Close();
+            RefreshUi();
+        };
+        panel.RenameRequested += (rec, name) =>
+        {
+            rec.Name = name;
+            rec.TitleRequested = true; // the user's name wins over the automatic one
+            store.Save();
             RefreshUi();
         };
         panel.NewRequested += async () =>
