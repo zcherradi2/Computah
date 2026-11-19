@@ -348,3 +348,85 @@ Every message can also carry these Computah notes:
 - [ ] Multi-monitor / mixed-DPI pass for overlay, cards, fan, panel.
 - [ ] Shell-made changes: optional snapshot or diff of workspace files before and after a turn.
 - [ ] Qwen Code: log in and test; consider other agents (Codex CLI, Gemini CLI) through the same stream protocol where available.
+
+---
+
+## 10. Production readiness (assessment of 2026-11-19)
+
+**Verdict:** a strong personal tool and a convincing alpha, but not ready to ship to other people yet. Fine for the author and a few trusted colleagues.
+
+### What's solid
+- **The core loop:** hotkey → capture → streamed answer → follow-ups → sessions. Heavily used and holding up.
+- **Showing instead of telling:** pointing, frames, drawings, file cards, and change cards with Undo/Redo and tabs.
+- **Clicking by element** (UI Automation), which makes even weaker models such as DeepSeek click accurately.
+- **Several agents:** Claude Code; the built-in agent on the Claude API or DeepSeek; Qwen Code once signed in. Every agent is checked before it can be chosen.
+- **Tested end to end:**
+  - DeepSeek through the bubble
+  - clicking by element (Spotify on the taskbar, Notepad's menu)
+  - the Narrow and None sight modes
+  - file edits with change cards
+  - resuming conversations
+
+### What blocks a real release
+
+1. **Safety of mouse and keyboard control (the biggest one).**
+   - **Prompt injection:** anything on screen (web pages, emails, chat messages) reaches the agent as text in the element list or pixels in the screenshot. A malicious page could say "click Send" or "type this into the terminal". With control on, only the agent's judgement stops it.
+   - **No guard on outward actions:** nothing asks for confirmation before sending messages, submitting forms or paying. The agent sent a Slack DM on request; nothing would have stopped it if a page had asked instead.
+   - **Needed:**
+     - per-app permissions (allow list)
+     - mandatory confirmation for sending, submitting, paying and typing into terminals
+     - treating screen text and element names as untrusted data in the prompt
+2. **Privacy.**
+   - **What leaves the machine:** every capture sends a screenshot and the window's text to a third party (Anthropic or DeepSeek), including whatever is visible: passwords, emails, customer data.
+   - **What builds up locally:**
+     - screenshots pile up in `screenshots\` forever
+     - `commands.log` keeps command outputs
+     - conversations (`threads\`, `sessions.json`) are stored unencrypted
+   - **Needed:**
+     - a privacy notice
+     - automatic screenshot cleanup and retention limits
+     - excluded apps (password managers, banking), where nothing is captured
+     - a visible "what will be sent" step
+3. **Untested areas.**
+   - the built-in agent on Claude (no Anthropic key on the dev machine)
+   - Qwen Code
+   - multiple monitors and mixed display scaling
+   - the drag-to-session fan and dropping on a ghost tag
+   - "Ask each time" control mode
+   - `scroll` and `drag` actions
+   - the hover pause on cards; a real click keeping a card open
+   - a narrow-sight view moved during a long task
+   - **no automated test suite:** everything was tested by hand or with temporary `// PREVIEW-TEMP` hooks
+4. **Robustness.**
+   - **Fragile spots:**
+     - the `edit:` prefix in `SharedPaths`
+     - two very large files, `BubbleWindow.xaml.cs` and `PeekWindow.cs`
+     - several features configured only through `settings.json`
+   - **Error handling** covers the paths we hit, not every failure.
+   - **Edge cases:**
+     - switching windows during an action
+     - a slow or offline API
+     - huge files in cards
+     - very busy accessibility trees
+5. **Product basics.**
+   - installer with **code signing**: unsigned apps that send keystrokes trip antivirus and SmartScreen
+   - auto-update
+   - settings window instead of JSON
+   - configurable hotkeys
+   - onboarding
+   - crash reporting
+6. **Legal and licensing.**
+   - **Logins:** distributed users need their own Claude Code login or API keys; one subscription can't power other people.
+   - **Naming:** no "Claude Code" in the product name ("Powered by Claude" is fine).
+   - **Where data goes:** DeepSeek sends screen data to China-based servers, which matters for business users and GDPR.
+   - **The grey area:** see §8 for subscription and automated use.
+
+### Before a private beta, in order
+1. **Action safety:**
+   - confirmation for sending, submitting, paying and typing into terminals
+   - per-app allow list
+   - screen text marked as untrusted
+2. **Privacy:** screenshot retention limits, excluded apps, privacy notice.
+3. **Settings window and a signed installer.**
+4. **Small automated test suite:** `HintFilter`, `Diff`, `SharedAccess`, `ScreenMap.ResolveElement`, `BuiltinSession` tools, prompt building.
+5. **Work through the untested list above**, especially multiple monitors and the built-in Claude agent.
