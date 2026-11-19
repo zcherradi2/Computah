@@ -6,7 +6,7 @@
         ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True" ShowActivated="False"
         WindowStartupLocation="Manual" UseLayoutRounding="True"
         FontFamily="Segoe UI Variable Text, Segoe UI">
-    <Grid x:Name="Root" Cursor="Hand" ToolTip="Computah: click for sessions, drag to move"
+    <Grid x:Name="Root" Cursor="Hand" ToolTip="Computah: click for sessions, drag to move, drop files to share them"
           RenderTransformOrigin="0.5,0.5">
         <Grid.RenderTransform>
             <ScaleTransform x:Name="Scale" ScaleX="1" ScaleY="1"/>

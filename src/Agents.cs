@@ -19,7 +19,10 @@ public sealed class AgentInfo
     public required string[] KnownPaths { get; init; }        // usual install locations
     public required string InstallHint { get; init; }
     public bool SupportsSystemPromptFlag { get; init; }       // else instructions go in the first message
-    public required Func<Settings, string?, List<string>> Args { get; init; }
+    /// (settings, resume session id, shared files/folders) → command-line arguments.
+    public required Func<Settings, string?, IReadOnlyList<string>, List<string>> Args { get; init; }
+    /// Whether shared files/folders are granted real access (otherwise they are only mentioned).
+    public bool SupportsSharedPaths { get; init; }
     /// One-shot, text-only, unsaved run used to name a session. The prompt is sent on stdin.
     public required Func<List<string>> TitleArgs { get; init; }
 
@@ -43,14 +46,20 @@ static class Agents
             KnownPaths = new[] { System.IO.Path.Combine(Home, ".local", "bin", "claude.exe"), System.IO.Path.Combine(Roaming, "npm", "claude.cmd") },
             InstallHint = "irm https://claude.ai/install.ps1 | iex",
             SupportsSystemPromptFlag = true,
-            Args = (s, resume) =>
+            SupportsSharedPaths = true,
+            Args = (s, resume, shared) =>
             {
                 var a = new List<string> { "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages" };
                 if (resume != null) { a.Add("--resume"); a.Add(resume); }
                 var model = s.ModelFor("claude");
                 if (!string.IsNullOrWhiteSpace(model)) { a.Add("--model"); a.Add(model); }
                 a.Add("--append-system-prompt"); a.Add(Prompts.Build(s));
-                if (!string.IsNullOrWhiteSpace(s.AllowedTools)) { a.Add("--allowedTools"); a.Add(s.AllowedTools); }
+
+                // Dropped folders become extra working directories; dropped files get a read permission each.
+                foreach (var dir in shared.Where(Directory.Exists)) { a.Add("--add-dir"); a.Add(dir); }
+                var allow = shared.Where(File.Exists).Select(f => $"Read({f.Replace('\\', '/')})").ToList();
+                if (!string.IsNullOrWhiteSpace(s.AllowedTools)) allow.AddRange(s.AllowedTools.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+                if (allow.Count > 0) { a.Add("--allowedTools"); a.AddRange(allow); }
                 if (!s.LoadMcpServers) a.Add("--strict-mcp-config");
                 // Never let the agent open the saved screenshots on its own.
                 a.Add("--disallowedTools"); a.Add($"Read({Paths.Screenshots.Replace('\\', '/')}/**)");
@@ -65,7 +74,7 @@ static class Agents
             KnownPaths = new[] { System.IO.Path.Combine(Local, "qwen-code", "bin", "qwen.cmd"), System.IO.Path.Combine(Roaming, "npm", "qwen.cmd") },
             InstallHint = "npm install -g @qwen-code/qwen-code",
             SupportsSystemPromptFlag = false,
-            Args = (s, resume) =>
+            Args = (s, resume, shared) =>
             {
                 var a = new List<string> { "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages" };
                 if (resume != null) { a.Add("--resume"); a.Add(resume); }

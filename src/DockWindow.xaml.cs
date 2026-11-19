@@ -19,6 +19,7 @@ public partial class DockWindow : Window
     bool pulsing;
 
     public event Action? Clicked;
+    public event Action<string[]>? FilesDropped;
 
     public DockWindow(SessionStore store)
     {
@@ -35,6 +36,27 @@ public partial class DockWindow : Window
         Root.MouseEnter += (_, _) => Zoom(1.07);
         Root.MouseLeave += (_, _) => Zoom(1.0);
         Root.MouseLeftButtonDown += OnMouseDown;
+
+        // Drop files/folders on the button to share them with the target session.
+        // Registered directly with Windows (see FileDropTarget): WPF's own drop handling misses the first drag here.
+        Root.Background = Brushes.Transparent; // whole button area is part of the window
+        SourceInitialized += (_, _) =>
+            dropTarget = FileDropTarget.Register(new WindowInteropHelper(this).Handle,
+                hover => Dispatcher.BeginInvoke(() => { Zoom(hover ? 1.18 : 1.0); DropGlow(hover); }),
+                files => FilesDropped?.Invoke(files));
+        Closed += (_, _) => FileDropTarget.Unregister(new WindowInteropHelper(this).Handle);
+    }
+
+    FileDropTarget? dropTarget; // kept alive while registered
+
+    void DropGlow(bool on)
+    {
+        if (pulsing) return; // the "answering" glow already owns the effect
+        Glow.BeginAnimation(DropShadowEffect.OpacityProperty, null);
+        Glow.Color = on ? Color.FromRgb(0x5C, 0xE1, 0xFF) : Colors.Black;
+        Glow.ShadowDepth = on ? 0 : 3;
+        Glow.BlurRadius = on ? 26 : 14;
+        Glow.Opacity = on ? 1 : 0.55;
     }
 
     /// Physical screen rectangle of the button (for placing the panel next to it).

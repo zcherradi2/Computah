@@ -209,7 +209,7 @@ sealed class AssistHost : IDisposable
 
     BubbleWindow OpenBubble(SessionRecord rec, AgentInfo agent, Settings settings)
     {
-        var w = new BubbleWindow(settings, agent, rec.AgentSessionId, rec.History);
+        var w = new BubbleWindow(settings, agent, rec.AgentSessionId, rec.History, rec.SharedPaths);
         rec.Window = w;
         w.Changed += () =>
         {
@@ -248,6 +248,26 @@ sealed class AssistHost : IDisposable
         rec.Name = title;
         store.Save();
         RefreshUi();
+    }
+
+    /// Files/folders dropped on the Computah button: share them with the target session (or a new one) and open it.
+    void ShareWithTarget(string[] paths)
+    {
+        var settings = Settings.Load();
+        var rec = store.Focused;
+        var w = rec?.Window;
+        if (w == null)
+        {
+            var agent = rec != null ? Agents.ById(rec.AgentId) : Agents.Resolve(settings);
+            if (agent == null) { ShowPicker(firstRun: string.IsNullOrEmpty(settings.Agent)); return; }
+            rec ??= store.Create(agent.Id);
+            w = OpenBubble(rec, agent, settings);
+        }
+        SetFocused(rec!);
+        w.ShareFiles(paths);
+        store.Save();
+        Native.GetCursorPos(out var pt);
+        w.ShowFocused(pt.X, pt.Y);
     }
 
     /// From the sessions panel: show the conversation as it is, next to the mouse, without capturing anything.
@@ -289,6 +309,7 @@ sealed class AssistHost : IDisposable
         {
             dock = new DockWindow(store);
             dock.Clicked += TogglePanel;
+            dock.FilesDropped += ShareWithTarget;
             dock.Show();
             dock.Refresh();
         }

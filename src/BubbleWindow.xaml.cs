@@ -29,7 +29,7 @@ public partial class BubbleWindow : Window
     static readonly Brush AccentBrush = Frozen(Color.FromRgb(0xD9, 0x77, 0x57));
     static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
-    sealed record Attachment(string Kind, string Label, FrameworkElement Chip, string? Image = null);
+    sealed record Attachment(string Kind, string Label, FrameworkElement Chip, string? Image = null, string? Path = null);
 
     Settings settings;
     readonly AgentInfo agent;
@@ -77,12 +77,27 @@ public partial class BubbleWindow : Window
     /// The user clicked into this bubble.
     public event Action? UserFocused;
 
-    public BubbleWindow(Settings settings, AgentInfo agent, string? resumeId = null, IReadOnlyList<Turn>? history = null)
+    // Files/folders shared with this session (the SessionRecord's list), and what the running agent was started with.
+    readonly List<string> sharedPaths;
+    string startedPaths = "";
+
+    public BubbleWindow(Settings settings, AgentInfo agent, string? resumeId = null, IReadOnlyList<Turn>? history = null,
+                        List<string>? sharedPaths = null)
     {
         this.settings = settings;
         this.agent = agent;
         this.resumeId = resumeId;
+        this.sharedPaths = sharedPaths ?? new List<string>();
         InitializeComponent();
+        AllowDrop = true;
+        PreviewDragOver += (_, e) =>
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
+        };
+        PreviewDrop += (_, e) =>
+        {
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] files) { e.Handled = true; ShareFiles(files); }
+        };
         AgentLabel.Text = agent.Name;
         ShowActivated = false; // keep focus on the user's app until the selection has been grabbed
 
@@ -127,6 +142,8 @@ public partial class BubbleWindow : Window
 
     void OnClosed(object? sender, EventArgs e)
     {
+        // Files dropped but never sent are not shared after all.
+        foreach (var a in attachments.Where(a => a.Path != null)) sharedPaths.Remove(a.Path!);
         closed = true;
         CompositionTarget.Rendering -= OnFrame;
         session?.Dispose();
@@ -134,7 +151,9 @@ public partial class BubbleWindow : Window
 
     void StartSession(string? resume = null, bool refreshInstructions = false)
     {
-        session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions);
+        var paths = sharedPaths.ToList();
+        session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions, paths);
+        startedPaths = string.Join("|", paths);
         session.Text += t =>
         {
             var tags = new List<HintTag>();
@@ -253,7 +272,8 @@ public partial class BubbleWindow : Window
     };
 
     void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip,
-                       string? glyph = null, string? text = null, int? at = null, string? open = null, string? image = null)
+                       string? glyph = null, string? text = null, int? at = null, string? open = null, string? image = null,
+                       string? path = null)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         if (visual != null) sp.Children.Add(visual);
@@ -275,7 +295,7 @@ public partial class BubbleWindow : Window
         if (!string.IsNullOrEmpty(tip)) chip.ToolTip = tip;
         if (open != null) chip.MouseLeftButtonUp += (_, e) => { if (!e.Handled) Open(open); };
 
-        var a = new Attachment(kind, label, chip, image);
+        var a = new Attachment(kind, label, chip, image, path);
         x.MouseLeftButtonUp += (_, e) => { e.Handled = true; RemoveAttachment(a); };
         int i = Math.Clamp(at ?? attachments.Count, 0, attachments.Count);
         attachments.Insert(i, a);
@@ -286,8 +306,31 @@ public partial class BubbleWindow : Window
     {
         attachments.Remove(a);
         Attachments.Children.Remove(a.Chip);
+        if (a.Path != null) { sharedPaths.Remove(a.Path); Changed?.Invoke(); } // un-share before it was ever sent
         UpdatePlaceholder();
         Input.Focus();
+    }
+
+    /// Files/folders dropped on the bubble or the Computah button: give this session access and show a tag for each.
+    public void ShareFiles(IEnumerable<string> paths)
+    {
+        foreach (var raw in paths)
+        {
+            string p;
+            try { p = System.IO.Path.GetFullPath(raw); } catch { continue; }
+            bool isDir = System.IO.Directory.Exists(p);
+            if (!isDir && !System.IO.File.Exists(p)) continue;
+            if (attachments.Any(x => x.Path != null && string.Equals(x.Path, p, StringComparison.OrdinalIgnoreCase))) continue;
+            if (!sharedPaths.Contains(p, StringComparer.OrdinalIgnoreCase)) sharedPaths.Add(p);
+
+            var name = System.IO.Path.GetFileName(p.TrimEnd('\\', '/'));
+            if (name.Length == 0) name = p;
+            AddAttachment("file", name, null, p + (isDir ? "\n(folder)" : ""), isDir ? "" : "",
+                          name.Length > 24 ? name[..22] + "…" : name, path: p);
+        }
+        Attachments.Visibility = attachments.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdatePlaceholder();
+        Changed?.Invoke();
     }
 
     void UpdatePlaceholder()
@@ -311,6 +354,7 @@ public partial class BubbleWindow : Window
         var blocks = new List<object>();
         string body = text.Length > 0 ? text
                     : ctx != null ? settings.Instruction
+                    : attachments.Any(a => a.Path != null) ? "Take a look at what I shared and tell me briefly what it is and anything that stands out."
                     : "Look at the pasted image(s) and help with what I most likely need. Be concise.";
         string? attachLine = attachments.Count > 0 ? string.Join(" · ", attachments.Select(a => a.Label)) : null;
         var pastedImages = attachments.Where(a => a.Image != null).Select(a => a.Image!).ToList();
@@ -331,6 +375,15 @@ public partial class BubbleWindow : Window
             blocks.AddRange(pastedImages.Select(Img.Block));
             body = $"[The user pasted {pastedImages.Count} image(s); they are the last image(s) attached to this message.]\n\n" + body;
         }
+        var files = attachments.Where(a => a.Path != null).Select(a => a.Path!).ToList();
+        if (files.Count > 0)
+        {
+            var list = string.Join("\n", files.Select(p => $"- {p}{(System.IO.Directory.Exists(p) ? "  (folder)" : "")}"));
+            var how = agent.SupportsSharedPaths
+                ? "You have read access to them: use your file tools (read, list, search) on these exact paths."
+                : "Try to open them with your file tools using these exact paths.";
+            body = $"[Computah] The user shared these with you. {how}\n{list}\n\n" + body;
+        }
         attachments.Clear();
         Attachments.Children.Clear();
         Attachments.Visibility = Visibility.Collapsed;
@@ -343,7 +396,10 @@ public partial class BubbleWindow : Window
     void Dispatch(List<object> blocks, string userText, string? attachLine)
     {
         // The control permission changed since this agent started: restart it (same conversation) so it knows.
-        if (session != null && Settings.Load().Control != settings.Control) RestartSession();
+        // The control permission or the shared files changed since this agent started: restart it
+        // (same conversation) so it has the right instructions and file access.
+        if (session != null && (Settings.Load().Control != settings.Control || string.Join("|", sharedPaths) != startedPaths))
+            RestartSession();
         if (session == null)
         {
             try { StartSession(); }

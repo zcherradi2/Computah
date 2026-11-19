@@ -20,6 +20,9 @@ public sealed class SessionRecord
     /// Title written by the agent after the first exchange.
     public string? Name { get; set; }
 
+    /// Files and folders the user dropped on Computah for this session; the agent may read them.
+    public List<string> SharedPaths { get; set; } = new();
+
     [JsonIgnore] public BubbleWindow? Window { get; set; }
     [JsonIgnore] public bool TitleRequested { get; set; }
 

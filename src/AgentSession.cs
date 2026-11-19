@@ -26,7 +26,7 @@ sealed class AgentSession : IDisposable
 
     /// `refreshInstructions`: resuming after the instructions changed (e.g. control was just allowed);
     /// agents without a system-prompt flag then get the new instructions with the next message.
-    public AgentSession(Settings s, AgentInfo agent, string? resumeId = null, bool refreshInstructions = false)
+    public AgentSession(Settings s, AgentInfo agent, string? resumeId, bool refreshInstructions, IReadOnlyList<string> sharedPaths)
     {
         SessionId = resumeId;
         if (!agent.SupportsSystemPromptFlag && (resumeId == null || refreshInstructions))
@@ -49,7 +49,7 @@ sealed class AgentSession : IDisposable
             StandardErrorEncoding = new UTF8Encoding(false),
             StandardInputEncoding = new UTF8Encoding(false),
         };
-        foreach (var a in agent.Args(s, resumeId)) psi.ArgumentList.Add(a);
+        foreach (var a in agent.Args(s, resumeId, sharedPaths)) psi.ArgumentList.Add(a);
 
         // Don't let a parent Claude Code session's env leak in.
         psi.Environment.Remove("CLAUDECODE");
