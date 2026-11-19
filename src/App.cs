@@ -88,6 +88,9 @@ sealed class AssistHost : IDisposable
         app.Dispatcher.BeginInvoke(() =>
         {
             SetDockVisible(settings.ShowDock);
+            // Name older sessions that don't have a title yet.
+            foreach (var rec in store.Sessions.Where(r => r.Name == null).ToList())
+                if (Agents.ById(rec.AgentId) is { } a) MaybeNameSession(rec, a);
             // First run (or the chosen agent was uninstalled): ask which agent to use.
             if (Agents.Resolve(settings) == null) ShowPicker(firstRun: string.IsNullOrEmpty(settings.Agent));
         });
@@ -202,6 +205,7 @@ sealed class AssistHost : IDisposable
             if (w.HasConversation) rec.Updated = DateTime.Now;
             store.Save();
             RefreshUi();
+            MaybeNameSession(rec, agent);
         };
         w.UserFocused += () => { if (store.FocusedId != rec.Id) SetFocused(rec); };
         w.Closed += (_, _) =>
@@ -215,6 +219,23 @@ sealed class AssistHost : IDisposable
     }
 
     // ---------- sessions ----------
+
+    /// After the first answer, ask the agent for a short title and use it in the sessions list.
+    async void MaybeNameSession(SessionRecord rec, AgentInfo agent)
+    {
+        if (rec.Name != null || rec.TitleRequested) return;
+        var user = rec.History.FirstOrDefault(t => t.User);
+        var answer = rec.History.FirstOrDefault(t => !t.User);
+        if (user == null || answer == null) return;
+        rec.TitleRequested = true;
+
+        var userText = user.Text.Length > 0 ? user.Text : $"(shared {user.Attach ?? "their screen"} without typing anything)";
+        var title = await Titles.GenerateAsync(agent, userText, answer.Text);
+        if (title == null || !store.Sessions.Contains(rec)) return;
+        rec.Name = title;
+        store.Save();
+        RefreshUi();
+    }
 
     /// From the sessions panel: show the conversation as it is, next to the mouse, without capturing anything.
     void OpenSession(SessionRecord rec)

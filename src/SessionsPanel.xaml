@@ -1,7 +1,7 @@
 <Window x:Class="Assist.SessionsPanel"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Computah sessions" Width="372" SizeToContent="Height"
+        Title="Computah sessions" Width="420" SizeToContent="Height"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ResizeMode="NoResize" ShowInTaskbar="False" Topmost="True"
         WindowStartupLocation="Manual" Opacity="0" UseLayoutRounding="True"

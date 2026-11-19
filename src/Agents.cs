@@ -20,6 +20,8 @@ public sealed class AgentInfo
     public required string InstallHint { get; init; }
     public bool SupportsSystemPromptFlag { get; init; }       // else instructions go in the first message
     public required Func<Settings, string?, List<string>> Args { get; init; }
+    /// One-shot, text-only, unsaved run used to name a session. The prompt is sent on stdin.
+    public required Func<List<string>> TitleArgs { get; init; }
 
     public string? Path { get; set; }
     public bool Installed => Path != null;
@@ -54,6 +56,7 @@ static class Agents
                 a.Add("--disallowedTools"); a.Add($"Read({Paths.Screenshots.Replace('\\', '/')}/**)");
                 return a;
             },
+            TitleArgs = () => new List<string> { "-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--strict-mcp-config" },
         },
         new AgentInfo
         {
@@ -70,6 +73,7 @@ static class Agents
                 if (!string.IsNullOrWhiteSpace(model)) { a.Add("--model"); a.Add(model); }
                 return a;
             },
+            TitleArgs = () => new List<string> { "-p", "Reply with only the title." },
         },
     };
 

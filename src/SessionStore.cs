@@ -17,13 +17,18 @@ public sealed class SessionRecord
     public DateTime Created { get; set; } = DateTime.Now;
     public DateTime Updated { get; set; } = DateTime.Now;
 
+    /// Title written by the agent after the first exchange.
+    public string? Name { get; set; }
+
     [JsonIgnore] public BubbleWindow? Window { get; set; }
+    [JsonIgnore] public bool TitleRequested { get; set; }
 
     [JsonIgnore]
     public string Title
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(Name)) return Name;
             var first = History.FirstOrDefault(t => t.User);
             if (first == null) return "New session";
             var text = first.Text.Length > 0 ? first.Text : first.Attach != null ? "Shared: " + first.Attach : "New session";
@@ -63,7 +68,7 @@ public sealed class SessionStore
 
     [JsonIgnore] public SessionRecord? Focused => Sessions.FirstOrDefault(s => s.Id == FocusedId);
 
-    public IEnumerable<SessionRecord> NewestFirst => Sessions.OrderByDescending(s => s.Updated);
+    [JsonIgnore] public IEnumerable<SessionRecord> NewestFirst => Sessions.OrderByDescending(s => s.Updated);
 
     public SessionRecord Create(string agentId)
     {
