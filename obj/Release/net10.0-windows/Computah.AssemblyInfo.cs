@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Computah")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+472550b114356fd0610796365addd9363ef834e7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7a55716ba2a484b5b209d8da7d3956cfcb37af1e")]
 [assembly: System.Reflection.AssemblyProductAttribute("Computah")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Computah")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,13 +1,16 @@
 {
-    "agent":  "claude",
-    "models":  {
-                   "claude":  "sonnet",
-                   "qwen":  ""
-               },
-    "instruction":  "Look at my screen around the mouse pointer, plus any selected text and clipboard content. Work out what I most likely need help with and help directly: answer, explain, fix, translate or suggest the next step. Be concise.",
-    "systemPrompt":  "",
-    "captureSelection":  true,
-    "sendCursorCrop":  true,
-    "loadMcpServers":  false,
-    "allowedTools":  ""
+  "agent": "claude",
+  "models": {
+    "claude": "sonnet",
+    "qwen": ""
+  },
+  "instruction": "Look at my screen around the mouse pointer, plus any selected text and clipboard content. Work out what I most likely need help with and help directly: answer, explain, fix, translate or suggest the next step. Be concise.",
+  "systemPrompt": "",
+  "control": "on",
+  "showDock": true,
+  "attachClipboard": false,
+  "captureSelection": true,
+  "sendCursorCrop": true,
+  "loadMcpServers": false,
+  "allowedTools": ""
 }

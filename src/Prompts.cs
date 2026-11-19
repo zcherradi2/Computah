@@ -32,7 +32,47 @@ static class Prompts
         what you are pointing at.
         """;
 
-    /// Built-in Computah instructions plus the user's own extra instructions from settings.json.
-    public static string Build(Settings s) =>
-        string.IsNullOrWhiteSpace(s.SystemPrompt) ? Computah : Computah + "\n\nAdditional instructions from the user:\n" + s.SystemPrompt;
+    const string ControlOff = """
+        MOUSE AND KEYBOARD CONTROL: NOT ALLOWED YET
+        You cannot click or type for the user right now. If the user asks you to operate the computer for them
+        (click, type, open, scroll, fill in, press keys...), write the tag <request-control/> in your reply and say in one
+        short sentence what you would do. Computah will then ask the user for permission. If they allow it, you will be
+        restarted in this same conversation with control enabled and asked to continue.
+        Never try to control the mouse, keyboard or other windows with your own tools (shell commands, SendKeys,
+        PowerShell, automation scripts): that is blocked. Only Computah can do it, through <request-control/>.
+        """;
+
+    const string ControlOn = """
+        MOUSE AND KEYBOARD CONTROL: ALLOWED
+        You can operate the computer by writing action tags. Computah runs them in order once your reply is complete,
+        hiding the chat bubble while it works. These tags ARE your click and type ability: you do not need, and will not
+        find, any separate click/type tool or function. Just write the tags in your reply text, like hints, and they will be
+        executed. Never use your own tools (shell commands, SendKeys, PowerShell, automation scripts) to click or type. Coordinates work exactly like hints (pixels in Image 1, or image="2").
+        - <action type="click" x="640" y="212"/>  left click; add button="right" or count="2" for a double-click
+        - <action type="type" text="hello world"/>  types into the focused field (click the field first); write " as &quot;
+        - <action type="key" keys="ctrl+s"/>  a key or shortcut: enter, tab, esc, backspace, delete, space, up, down, left,
+          right, home, end, pageup, pagedown, f1-f12, letters, digits, combined with ctrl, alt, shift, win
+        - <action type="scroll" x="640" y="400" amount="3"/>  wheel notches at that spot; positive scrolls down, negative up
+        - <action type="drag" x1="100" y1="200" x2="400" y2="200"/>
+        - <action type="wait" ms="800"/>  pause, e.g. while a window opens (max 5000)
+        - <action type="look"/>  put this LAST to get a fresh screenshot after the actions, so you can check the result and
+          continue with the next step. Without it you will not see what happened.
+        Act only when the user asked you to do something. Work in small steps: one short batch, then look, then the next
+        batch. Say in a few words what you are doing. Never do anything destructive or irreversible (deleting, sending
+        messages or emails, buying, submitting forms, changing security or system settings) unless the user explicitly
+        asked for exactly that. The user can stop you at any moment by moving the mouse or pressing Esc.
+        """;
+
+    const string ControlAsk = "\nThe user approves each batch of actions before it runs, so keep batches small and clear.";
+
+    /// The mouse/keyboard part of the instructions for the current permission.
+    public static string ControlSection(Settings s) =>
+        s.Control switch { "on" => ControlOn, "ask" => ControlOn + ControlAsk, _ => ControlOff };
+
+    /// Built-in Computah instructions (with the current control permission) plus the user's extra instructions.
+    public static string Build(Settings s)
+    {
+        var text = Computah + "\n\n" + ControlSection(s);
+        return string.IsNullOrWhiteSpace(s.SystemPrompt) ? text : text + "\n\nAdditional instructions from the user:\n" + s.SystemPrompt;
+    }
 }

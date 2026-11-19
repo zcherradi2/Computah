@@ -31,7 +31,7 @@ public partial class BubbleWindow : Window
 
     sealed record Attachment(string Kind, string Label, FrameworkElement Chip, string? Image = null);
 
-    readonly Settings settings;
+    Settings settings;
     readonly AgentInfo agent;
     readonly string? resumeId;
     readonly List<Attachment> attachments = new();
@@ -56,6 +56,13 @@ public partial class BubbleWindow : Window
     ScreenMap? lastScreen;     // the latest screenshot sent in this conversation
     HintOverlay? overlay;
     int hintTurn, overlayTurn;
+
+    // Mouse/keyboard control: actions collected during a reply run once it is complete.
+    readonly List<HintTag> turnActions = new();
+    bool turnWantsControl, acting;
+    IntPtr lastTarget;         // the app the user was in at the latest capture
+    int autoTurns;             // look → act → look loop guard
+    string? pendingReport;     // told to the agent with the next message (stopped/declined actions)
 
     public List<Turn> History { get; } = new();
     public string? SessionId => session?.SessionId ?? resumeId;
@@ -125,15 +132,21 @@ public partial class BubbleWindow : Window
         session?.Dispose();
     }
 
-    void StartSession()
+    void StartSession(string? resume = null, bool refreshInstructions = false)
     {
-        session = new AgentSession(settings, agent, resumeId);
+        session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions);
         session.Text += t =>
         {
-            var hints = new List<HintTag>();
-            var shown = hintFilter.Feed(t, hints);
+            var tags = new List<HintTag>();
+            var shown = hintFilter.Feed(t, tags);
             lock (gate) pending.Append(shown);
-            if (hints.Count > 0) Dispatcher.BeginInvoke(() => ShowHints(hints));
+            if (tags.Count > 0) Dispatcher.BeginInvoke(() =>
+            {
+                var hints = tags.Where(x => x.Name == "hint").ToList();
+                if (hints.Count > 0) ShowHints(hints);
+                turnActions.AddRange(tags.Where(x => x.Name == "action"));
+                if (tags.Any(x => x.Name == "request-control")) turnWantsControl = true;
+            });
         };
         session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
         session.TurnDone += (err, msg) =>
@@ -290,15 +303,10 @@ public partial class BubbleWindow : Window
     void Send(string text)
     {
         text = text.Trim();
-        if (streaming || closed) return;
+        if (streaming || acting || closed) return;
         var ctx = pendingCtx;
         if (text.Length == 0 && attachments.Count == 0) return;
-
-        if (session == null)
-        {
-            try { StartSession(); }
-            catch (Exception ex) { Expand(); AddError($"Couldn't start {agent.Name}: " + ex.Message); return; }
-        }
+        autoTurns = 0;
 
         var blocks = new List<object>();
         string body = text.Length > 0 ? text
@@ -311,6 +319,7 @@ public partial class BubbleWindow : Window
         {
             ctx.IncludeScreen = attachments.Any(a => a.Kind == "screen");
             if (ctx.IncludeScreen) lastScreen = new ScreenMap(ctx);
+            lastTarget = ctx.ForegroundHwnd;
             ctx.IncludeSelection = attachments.Any(a => a.Kind == "selection");
             ctx.IncludeClipboard = attachments.Any(a => a.Kind == "clipboard");
             blocks.AddRange(ctx.ImageBlocks());
@@ -325,10 +334,24 @@ public partial class BubbleWindow : Window
         attachments.Clear();
         Attachments.Children.Clear();
         Attachments.Visibility = Visibility.Collapsed;
+        if (pendingReport != null) { body = pendingReport + "\n\n" + body; pendingReport = null; }
         blocks.Add(new { type = "text", text = body });
+        Dispatch(blocks, text, attachLine);
+    }
+
+    /// Shows the user's side of the turn and sends it to the agent.
+    void Dispatch(List<object> blocks, string userText, string? attachLine)
+    {
+        // The control permission changed since this agent started: restart it (same conversation) so it knows.
+        if (session != null && Settings.Load().Control != settings.Control) RestartSession();
+        if (session == null)
+        {
+            try { StartSession(); }
+            catch (Exception ex) { Expand(); AddError($"Couldn't start {agent.Name}: " + ex.Message); return; }
+        }
 
         Expand();
-        AddUserBubble(text, attachLine);
+        AddUserBubble(userText, attachLine);
         current = MakeText("", Fg);
         current.Margin = new Thickness(0, 4, 0, 8);
         Messages.Children.Add(current);
@@ -337,6 +360,8 @@ public partial class BubbleWindow : Window
         SetStreaming(true);
         StatusText.Text = "Thinking…";
         hintFilter.Reset();
+        turnActions.Clear();
+        turnWantsControl = false;
         hintTurn++;
         try { session!.Send(blocks); }
         catch (Exception ex)
@@ -415,7 +440,209 @@ public partial class BubbleWindow : Window
         }
         if (IsActive) Input.Focus();
         Changed?.Invoke();
-        if (sendRequested && contextReady) SendAsIs();
+
+        // Actions / control requests from this reply.
+        var acts = turnActions.ToList();
+        bool wantsControl = turnWantsControl;
+        turnActions.Clear();
+        turnWantsControl = false;
+        if (!doneInfo.err)
+        {
+            var mode = Settings.Load().Control;
+            if (acts.Count > 0)
+            {
+                if (mode == "on") _ = RunActions(acts);
+                else if (mode == "ask") AddApprovalCard(acts);
+                else AddPermissionCard();
+            }
+            else if (wantsControl && mode == "off") AddPermissionCard();
+        }
+
+        if (sendRequested && contextReady && !acting) SendAsIs();
+    }
+
+    // ---------- mouse & keyboard control ----------
+
+    /// Restart the agent process in the same conversation so it picks up new instructions.
+    void RestartSession()
+    {
+        var sid = SessionId;
+        session?.Dispose();
+        session = null;
+        settings = Settings.Load();
+        try { StartSession(sid, refreshInstructions: true); }
+        catch (Exception ex) { AddError($"Couldn't restart {agent.Name}: " + ex.Message); }
+    }
+
+    void AddPermissionCard()
+    {
+        var card = Card(
+            $"Let {agent.Name} control your mouse and keyboard?",
+            "It can then click, type and press keys for you. Move the mouse or press Esc to stop it at any time.");
+        var buttons = (StackPanel)((StackPanel)card.Child).Children[2];
+        buttons.Children.Add(CardButton("Allow", true, () => Grant(card, "on")));
+        buttons.Children.Add(CardButton("Ask me each time", false, () => Grant(card, "ask")));
+        buttons.Children.Add(CardButton("Not now", false, () => { Resolve(card, "Control not allowed."); pendingReport = "[Computah] The user did not allow mouse and keyboard control. Help them do it themselves."; }));
+        Messages.Children.Add(card);
+        Scroller.ScrollToEnd();
+        ShowBubble(activate: true);
+    }
+
+    void Grant(Border card, string mode)
+    {
+        var s = Settings.Load();
+        s.Control = mode;
+        s.Save();
+        Resolve(card, mode == "on" ? "Control allowed." : "Control allowed: you'll approve each step.");
+        RestartSession();
+        var note = "[Computah] The user allowed mouse and keyboard control" + (mode == "ask" ? " (they approve each batch)" : "") +
+                   ". Do what they asked now by writing <action/> tags in your reply (coordinates from the latest screenshot), " +
+                   "ending with <action type=\"look\"/> if you need to check the result.";
+        Dispatch(new List<object> { new { type = "text", text = note } }, "", "Computah: control allowed");
+    }
+
+    void AddApprovalCard(List<HintTag> acts)
+    {
+        var lines = string.Join("\n", acts.Take(10).Select(a => "• " + ActionRunner.Describe(a))) + (acts.Count > 10 ? $"\n• …and {acts.Count - 10} more" : "");
+        var card = Card($"{agent.Name} wants to:", lines);
+        var buttons = (StackPanel)((StackPanel)card.Child).Children[2];
+        buttons.Children.Add(CardButton("Run", true, () => { Resolve(card, "Approved."); _ = RunActions(acts); }));
+        buttons.Children.Add(CardButton("Cancel", false, () => { Resolve(card, "Cancelled."); pendingReport = "[Computah] The user cancelled your last actions; nothing was done."; }));
+        Messages.Children.Add(card);
+        Scroller.ScrollToEnd();
+        ShowBubble(activate: true);
+    }
+
+    async Task RunActions(List<HintTag> acts)
+    {
+        if (acting || closed) return;
+        acting = true;
+        SendBtn.IsEnabled = false;
+        StatusText.Text = "Working… move the mouse or press Esc to stop";
+        Dot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.25, TimeSpan.FromMilliseconds(300)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+
+        bool wasVisible = IsVisible;
+        Hide();                     // never click our own bubble
+        await Task.Delay(150);
+
+        ActionRunner.Result res;
+        try { res = await ActionRunner.RunAsync(acts, lastScreen, lastTarget, FlashPointer); }
+        catch (Exception ex) { res = new ActionRunner.Result(false, "an error: " + ex.Message, new List<string>()); }
+
+        CapturedContext? shot = null;
+        if (res.Stopped == null && res.Look && autoTurns < 10 && !closed)
+        {
+            await Task.Delay(450);  // let the screen settle
+            try { shot = await ContextCapture.CaptureAsync(Settings.Load()); } catch (Exception ex) { Paths.Log("look: " + ex.Message); }
+        }
+
+        acting = false;
+        Dot.BeginAnimation(OpacityProperty, null);
+        SendBtn.IsEnabled = true;
+        StatusText.Text = "";
+        if (closed) return;
+        if (wasVisible) ShowBubble(activate: false);
+
+        var doneText = res.Done.Count > 0 ? string.Join("; ", res.Done) : "nothing";
+        if (res.Stopped != null)
+        {
+            AddNote($"Stopped: {res.Stopped}.");
+            pendingReport = $"[Computah] Your actions were stopped because {res.Stopped}. Completed before that: {doneText}.";
+        }
+        else if (shot != null)
+        {
+            autoTurns++;
+            shot.IncludeSelection = false;
+            shot.IncludeClipboard = false;
+            lastScreen = new ScreenMap(shot);
+            lastTarget = shot.ForegroundHwnd;
+            var blocks = new List<object>(shot.ImageBlocks())
+            {
+                new { type = "text", text = shot.ContextText() + $"\n\n[Computah] I ran your actions: {doneText}. This is the screen now. " +
+                                                              "Continue with the next step, or tell the user you're done." },
+            };
+            Dispatch(blocks, "", "Computah: screen after actions");
+        }
+        else
+        {
+            AddNote("Done.");
+            if (res.Look) pendingReport = $"[Computah] Ran your actions ({doneText}), but stopped the automatic look-loop after {autoTurns} rounds.";
+            else pendingReport = $"[Computah] Ran your actions: {doneText}.";
+        }
+        Changed?.Invoke();
+    }
+
+    /// The cartoon hand briefly shows where a click is about to land.
+    void FlashPointer(Point screen)
+    {
+        var mon = WF.Screen.FromPoint(new System.Drawing.Point((int)screen.X, (int)screen.Y)).Bounds;
+        var o = new HintOverlay(mon);
+        var tag = new HintTag { Name = "hint" };
+        tag.Attr["type"] = "point";
+        tag.Attr["x"] = (screen.X - mon.X).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        tag.Attr["y"] = (screen.Y - mon.Y).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        tag.Attr["seconds"] = "2";
+        o.Show();
+        o.Add(tag, ScreenMap.Identity(mon));
+    }
+
+    void ShowBubble(bool activate)
+    {
+        if (closed) return;
+        if (!IsVisible) Show();
+        if (activate)
+        {
+            Native.ForceForeground(new WindowInteropHelper(this).Handle);
+            Activate();
+        }
+    }
+
+    static Border Card(string title, string body)
+    {
+        var sp = new StackPanel();
+        sp.Children.Add(new TextBlock { Text = title, Foreground = Fg, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        sp.Children.Add(new TextBlock { Text = body, Foreground = Muted, FontSize = 12.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 10) });
+        sp.Children.Add(new StackPanel { Orientation = Orientation.Horizontal });
+        return new Border
+        {
+            Child = sp, CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 10, 12, 10), Margin = new Thickness(0, 6, 0, 8),
+            Background = Frozen(Color.FromArgb(0x1A, 0x5C, 0xE1, 0xFF)), BorderBrush = Frozen(Color.FromArgb(0x60, 0x5C, 0xE1, 0xFF)), BorderThickness = new Thickness(1),
+        };
+    }
+
+    static Button CardButton(string text, bool primary, Action click)
+    {
+        var b = new Button
+        {
+            Content = new TextBlock { Text = text, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal, Margin = new Thickness(0, 0, 0, 1) },
+            Foreground = primary ? Frozen(Color.FromRgb(0x0B, 0x12, 0x20)) : Fg, Cursor = Cursors.Hand, Focusable = false, Margin = new Thickness(0, 0, 6, 0),
+        };
+        b.Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
+            "<ControlTemplate TargetType='Button' xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>" +
+            $"<Border x:Name='Bd' CornerRadius='8' Padding='12,5' Background='{(primary ? "#5CE1FF" : "#22FFFFFF")}'><ContentPresenter VerticalAlignment='Center'/></Border>" +
+            "<ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'>" +
+            $"<Setter TargetName='Bd' Property='Background' Value='{(primary ? "#8AEBFF" : "#33FFFFFF")}'/></Trigger></ControlTemplate.Triggers></ControlTemplate>");
+        b.Click += (_, _) => click();
+        return b;
+    }
+
+    /// Replace a card's buttons with a short outcome line.
+    static void Resolve(Border card, string outcome)
+    {
+        var sp = (StackPanel)card.Child;
+        sp.Children.RemoveAt(2);
+        ((TextBlock)sp.Children[1]).Margin = new Thickness(0, 4, 0, 4);
+        sp.Children.Add(new TextBlock { Text = outcome, Foreground = Frozen(Color.FromRgb(0x5C, 0xE1, 0xFF)), FontSize = 12 });
+    }
+
+    void AddNote(string text)
+    {
+        Messages.Children.Add(new TextBlock
+        {
+            Text = text, FontSize = 11.5, Foreground = Muted, TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 6),
+        });
+        Scroller.ScrollToEnd();
     }
 
     // ---------- hints ----------

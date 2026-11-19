@@ -18,7 +18,10 @@ namespace Assist;
 /// A hint tag from the agent, e.g. &lt;hint type="point" x="10" y="20" label="Here"/&gt;.
 public sealed class HintTag
 {
+    /// "hint", "action" or "request-control".
+    public string Name { get; set; } = "hint";
     public Dictionary<string, string> Attr { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? Get(string key) => Attr.TryGetValue(key, out var v) ? v : null;
     public string Type => Attr.TryGetValue("type", out var t) ? t.ToLowerInvariant() : "";
     public string? Label => Attr.TryGetValue("label", out var l) && l.Trim().Length > 0 ? l.Trim() : null;
     public double Num(string key) =>
@@ -26,13 +29,15 @@ public sealed class HintTag
     public int Image => Attr.TryGetValue("image", out var v) && v.Trim() == "2" ? 2 : 1;
 }
 
-/// Streaming filter: removes &lt;hint .../&gt; tags from the agent's text (even when split across chunks)
-/// and hands them out as HintTags. Everything else passes through unchanged.
+/// Streaming filter: removes Computah tags (&lt;hint/&gt;, &lt;action/&gt;, &lt;request-control/&gt;) from the
+/// agent's text, even when split across chunks, and hands them out. Everything else passes through unchanged.
 public sealed class HintFilter
 {
-    static readonly Regex AttrRx = new("(\\w+)\\s*=\\s*\"([^\"]*)\"", RegexOptions.Compiled);
-    const string Open = "<hint";
+    static readonly Regex AttrRx = new("([\\w-]+)\\s*=\\s*\"([^\"]*)\"", RegexOptions.Compiled);
+    static readonly string[] Names = { "hint", "action", "request-control" };
     readonly StringBuilder hold = new();
+    string? name; // tag name once recognised
+    bool inQuote;
 
     public string Feed(string chunk, List<HintTag> found)
     {
@@ -45,25 +50,32 @@ public sealed class HintFilter
                 continue;
             }
             hold.Append(ch);
-            if (hold.Length <= Open.Length)
+            if (name == null)
             {
-                if (!Open.StartsWith(hold.ToString(), StringComparison.OrdinalIgnoreCase)) { output.Append(hold); hold.Clear(); }
-                continue;
+                var typed = hold.ToString(1, hold.Length - 1);
+                var exact = Names.FirstOrDefault(n => typed.Length == n.Length + 1 && typed.StartsWith(n, StringComparison.OrdinalIgnoreCase)
+                                                      && (char.IsWhiteSpace(ch) || ch == '/' || ch == '>'));
+                if (exact != null) name = exact;
+                else if (!Names.Any(n => n.StartsWith(typed, StringComparison.OrdinalIgnoreCase))) { output.Append(hold); hold.Clear(); continue; }
+                else continue;
             }
-            if (ch == '>')
+            if (ch == '"') inQuote = !inQuote;
+            if (ch == '>' && !inQuote)
             {
-                var tag = new HintTag();
-                foreach (Match m in AttrRx.Matches(hold.ToString())) tag.Attr[m.Groups[1].Value] = m.Groups[2].Value;
+                var tag = new HintTag { Name = name };
+                foreach (Match m in AttrRx.Matches(hold.ToString()))
+                    tag.Attr[m.Groups[1].Value] = System.Net.WebUtility.HtmlDecode(m.Groups[2].Value);
                 found.Add(tag);
                 hold.Clear();
+                name = null;
             }
-            else if (hold.Length > 600) { output.Append(hold); hold.Clear(); } // not a real tag
+            else if (hold.Length > 2000) { output.Append(hold); hold.Clear(); name = null; inQuote = false; } // not a real tag
         }
         return output.ToString();
     }
 
-    public string Flush() { var s = hold.ToString(); hold.Clear(); return s; }
-    public void Reset() => hold.Clear();
+    public string Flush() { var s = hold.ToString(); hold.Clear(); name = null; inQuote = false; return s; }
+    public void Reset() { hold.Clear(); name = null; inQuote = false; }
 }
 
 /// Maps screenshot pixel coordinates (Image 1 or the Image 2 crop) back to physical screen pixels.
@@ -73,6 +85,15 @@ public sealed class ScreenMap
     readonly double sx, sy;
     readonly int cropX, cropY;
     readonly bool hasCrop;
+
+    ScreenMap(System.Drawing.Rectangle monitor)
+    {
+        Monitor = monitor;
+        sx = sy = 1;
+    }
+
+    /// Coordinates are already physical pixels relative to the monitor's top-left corner.
+    public static ScreenMap Identity(System.Drawing.Rectangle monitor) => new(monitor);
 
     public ScreenMap(CapturedContext c)
     {

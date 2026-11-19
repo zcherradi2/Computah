@@ -60,7 +60,10 @@ public sealed class Settings
     /// Extra instructions added after Computah's built-in ones (see Prompts.cs).
     public string SystemPrompt { get; set; } = "";
 
-    public bool ShowDock { get; set; } = true;            // floating Computah button with the sessions list
+    /// Mouse and keyboard control by the agent: "off" (it must ask first), "ask" (approve each batch), "on".
+    public string Control { get; set; } = "off";
+
+    public bool ShowDock { get; set; } = true;           // floating Computah button with the sessions list
 
     /// Attach whatever is on the clipboard automatically. Off by default: paste it yourself with Ctrl+V.
     public bool AttachClipboard { get; set; } = false;

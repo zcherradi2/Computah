@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -95,6 +96,84 @@ static class Native
         }
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
+
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+
+    static void Send(INPUT[] inputs) => SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+
+    static INPUT Mouse(uint flags, int data = 0)
+    {
+        var i = new INPUT { type = 0 };
+        i.u.mi.dwFlags = flags;
+        i.u.mi.mouseData = unchecked((uint)data);
+        return i;
+    }
+
+    static INPUT Key(ushort vk, bool up, bool extended = false)
+    {
+        var i = new INPUT { type = 1 };
+        i.u.ki.wVk = vk;
+        i.u.ki.dwFlags = (up ? 0x0002u : 0u) | (extended ? 0x0001u : 0u);
+        return i;
+    }
+
+    /// Click at the current cursor position. button: "left" | "right" | "middle".
+    public static void Click(string button, int count)
+    {
+        (uint down, uint up) = button switch { "right" => (0x0008u, 0x0010u), "middle" => (0x0020u, 0x0040u), _ => (0x0002u, 0x0004u) };
+        for (int i = 0; i < Math.Clamp(count, 1, 3); i++) Send(new[] { Mouse(down), Mouse(up) });
+    }
+
+    public static void MouseDown() => Send(new[] { Mouse(0x0002) });
+    public static void MouseUp() => Send(new[] { Mouse(0x0004) });
+
+    /// Wheel notches at the current cursor position; positive scrolls down.
+    public static void Wheel(int notches) => Send(new[] { Mouse(0x0800, -120 * notches) });
+
+    /// Types any text (Unicode), newlines become Enter.
+    public static void TypeText(string text)
+    {
+        foreach (var ch in text.Replace("\r\n", "\n"))
+        {
+            if (ch == '\n') { Send(new[] { Key(0x0D, false), Key(0x0D, true) }); continue; }
+            var down = new INPUT { type = 1 }; down.u.ki.wScan = ch; down.u.ki.dwFlags = 0x0004;            // KEYEVENTF_UNICODE
+            var up = new INPUT { type = 1 }; up.u.ki.wScan = ch; up.u.ki.dwFlags = 0x0004 | 0x0002;
+            Send(new[] { down, up });
+        }
+    }
+
+    static readonly HashSet<int> ExtendedKeys = new() { 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C };
+
+    /// Presses a shortcut like "ctrl+shift+s", "enter", "alt+f4". Returns false if a key name is unknown.
+    public static bool PressKeys(string combo)
+    {
+        var parts = combo.ToLowerInvariant().Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var vks = new List<int>();
+        foreach (var p in parts)
+        {
+            int vk = KeyCode(p);
+            if (vk == 0) return false;
+            vks.Add(vk);
+        }
+        if (vks.Count == 0) return false;
+        var seq = new List<INPUT>();
+        foreach (var vk in vks) seq.Add(Key((ushort)vk, false, ExtendedKeys.Contains(vk)));
+        for (int i = vks.Count - 1; i >= 0; i--) seq.Add(Key((ushort)vks[i], true, ExtendedKeys.Contains(vks[i])));
+        Send(seq.ToArray());
+        return true;
+    }
+
+    static int KeyCode(string k) => k switch
+    {
+        "ctrl" or "control" => 0x11, "alt" => 0x12, "shift" => 0x10, "win" or "windows" or "cmd" or "meta" => 0x5B,
+        "enter" or "return" => 0x0D, "tab" => 0x09, "esc" or "escape" => 0x1B, "backspace" => 0x08,
+        "delete" or "del" => 0x2E, "insert" or "ins" => 0x2D, "space" => 0x20,
+        "up" => 0x26, "down" => 0x28, "left" => 0x25, "right" => 0x27,
+        "home" => 0x24, "end" => 0x23, "pageup" or "pgup" => 0x21, "pagedown" or "pgdn" => 0x22,
+        _ when k.Length == 1 && char.IsLetterOrDigit(k[0]) => char.ToUpperInvariant(k[0]),
+        _ when k.Length >= 2 && k[0] == 'f' && int.TryParse(k[1..], out var n) && n is >= 1 and <= 24 => 0x6F + n,
+        _ => 0,
+    };
 
     public static string WindowTitle(IntPtr h)
     {

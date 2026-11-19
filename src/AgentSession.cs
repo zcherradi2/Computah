@@ -24,11 +24,18 @@ sealed class AgentSession : IDisposable
     public event Action<string>? Status;        // background thread
     public event Action<bool, string?>? TurnDone; // (isError, message) background thread
 
-    public AgentSession(Settings s, AgentInfo agent, string? resumeId = null)
+    /// `refreshInstructions`: resuming after the instructions changed (e.g. control was just allowed);
+    /// agents without a system-prompt flag then get the new instructions with the next message.
+    public AgentSession(Settings s, AgentInfo agent, string? resumeId = null, bool refreshInstructions = false)
     {
         SessionId = resumeId;
-        if (!agent.SupportsSystemPromptFlag && resumeId == null)
-            instructions = Prompts.Build(s);
+        if (!agent.SupportsSystemPromptFlag && (resumeId == null || refreshInstructions))
+            instructions = "Instructions for this whole conversation:\n" + Prompts.Build(s);
+        else if (resumeId != null)
+            // A resumed conversation keeps the system prompt it started with (agents ignore a new one on resume),
+            // so the current control permission is restated in the next message.
+            instructions = "[Computah update: these instructions replace any earlier ones about mouse and keyboard control]\n" +
+                           Prompts.ControlSection(s);
 
         var psi = new ProcessStartInfo(agent.Path ?? throw new FileNotFoundException($"{agent.Name} is not installed"))
         {
@@ -62,10 +69,10 @@ sealed class AgentSession : IDisposable
     {
         turnHasText = false;
         inTurn = true;
-        if (instructions != null && SessionId == null && !sentInstructions)
+        if (instructions != null && !sentInstructions)
         {
             content = new List<object>(content);
-            content.Insert(0, new { type = "text", text = "Instructions for this whole conversation:\n" + instructions });
+            content.Insert(0, new { type = "text", text = instructions });
             sentInstructions = true;
         }
         var msg = new Dictionary<string, object?>

@@ -64,6 +64,19 @@ sealed class AssistHost : IDisposable
         menu.Items.Add("Sessions…", null, (_, _) => TogglePanel());
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Choose agent…", null, (_, _) => ShowPicker(firstRun: false));
+        var control = new WF.ToolStripMenuItem("Mouse && keyboard control");
+        foreach (var (label, value) in new[] { ("Off (agent must ask)", "off"), ("Ask me each time", "ask"), ("On", "on") })
+        {
+            var item = new WF.ToolStripMenuItem(label) { Tag = value };
+            item.Click += (_, _) => { var s = Settings.Load(); s.Control = value; s.Save(); };
+            control.DropDownItems.Add(item);
+        }
+        control.DropDownOpening += (_, _) =>
+        {
+            var current = Settings.Load().Control;
+            foreach (WF.ToolStripMenuItem i in control.DropDownItems) i.Checked = (string)i.Tag! == current;
+        };
+        menu.Items.Add(control);
         var showDock = new WF.ToolStripMenuItem("Show floating button") { Checked = settings.ShowDock, CheckOnClick = true };
         showDock.CheckedChanged += (_, _) => { var s = Settings.Load(); s.ShowDock = showDock.Checked; s.Save(); SetDockVisible(showDock.Checked); };
         menu.Items.Add(showDock);
