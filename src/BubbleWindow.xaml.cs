@@ -16,6 +16,9 @@ using WF = System.Windows.Forms;
 
 namespace Assist;
 
+/// One message in a conversation, kept so a closed bubble can be reopened with its history.
+public sealed record Turn(bool User, string Text, string? Attach);
+
 public partial class BubbleWindow : Window
 {
     static readonly Brush Fg = Frozen(Color.FromRgb(0xEC, 0xEC, 0xEE));
@@ -28,31 +31,52 @@ public partial class BubbleWindow : Window
 
     sealed record Attachment(string Kind, string Label, FrameworkElement Chip);
 
-    readonly CapturedContext ctx;
     readonly Settings settings;
-    readonly bool anchorBelow;
-    bool contextReady, sendRequested;
+    readonly string? resumeId;
     readonly List<Attachment> attachments = new();
 
+    // Context captured by the latest hotkey press, not sent yet.
+    CapturedContext? pendingCtx;
+    int pendingHotkey;
+    bool contextReady, sendRequested;
+
+    int anchorX, anchorY;
+    bool anchorBelow;
+
     ClaudeSession? session;
-    bool contextSent, streaming, userMoved, turnDonePending, closed;
+    bool streaming, userMoved, turnDonePending, closed;
     (bool err, string? msg) doneInfo;
     TextBox? current;
     readonly StringBuilder pending = new();
     readonly object gate = new();
 
-    public BubbleWindow(CapturedContext ctx, Settings settings)
+    public List<Turn> History { get; } = new();
+    public string? SessionId => session?.SessionId ?? resumeId;
+    public bool HasConversation => History.Count > 0;
+    public bool IsClosed => closed;
+
+    public BubbleWindow(Settings settings, string? resumeId = null, IReadOnlyList<Turn>? history = null)
     {
-        this.ctx = ctx;
         this.settings = settings;
+        this.resumeId = resumeId;
         InitializeComponent();
         ShowActivated = false; // keep focus on the user's app until the selection has been grabbed
 
-        var wa = WF.Screen.FromPoint(new System.Drawing.Point(ctx.CursorX, ctx.CursorY)).WorkingArea;
-        anchorBelow = ctx.CursorY < wa.Top + wa.Height * 0.55;
+        if (history is { Count: > 0 })
+        {
+            Expand();
+            foreach (var t in history)
+            {
+                if (t.User) AddUserBubble(t.Text, t.Attach);
+                else AddAssistantText(t.Text);
+            }
+            Messages.Children.Add(new TextBlock
+            {
+                Text = "Resumed", FontSize = 11, Foreground = Muted,
+                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 6),
+            });
+        }
 
-        BuildAttachments();
-        UpdatePlaceholder();
         SourceInitialized += (_, _) => PlaceNearCursor();
         SizeChanged += (_, _) => { if (!userMoved) PlaceNearCursor(); };
         Loaded += OnLoaded;
@@ -76,36 +100,6 @@ public partial class BubbleWindow : Window
             new DoubleAnimation(anchorBelow ? -6 : 6, 0, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
     }
 
-    public bool IsClosed => closed;
-
-    /// True while the compact input is open and nothing has been sent yet.
-    public bool CanSendAsIs => !contextSent && !closed;
-
-    /// Second Ctrl+Alt+A press: send now (waits for the selection grab if it's still running).
-    public void SendAsIs()
-    {
-        if (!contextReady) { sendRequested = true; return; }
-        Send(Input.Text);
-        Input.Clear();
-    }
-
-    /// Called once the selected text has been grabbed (or skipped).
-    public void ContextReady()
-    {
-        if (closed) return;
-        contextReady = true;
-        if (!contextSent && ctx.SelectedText != null)
-            AddAttachment("selection", "Selection", null, Preview(ctx.SelectedText), "", "Selection",
-                          at: attachments.Count > 0 && attachments[0].Kind == "screen" ? 1 : 0);
-        UpdatePlaceholder();
-
-        Native.ForceForeground(new WindowInteropHelper(this).Handle);
-        Activate();
-        Input.Focus();
-
-        if (sendRequested) { sendRequested = false; SendAsIs(); }
-    }
-
     void OnClosed(object? sender, EventArgs e)
     {
         closed = true;
@@ -115,7 +109,7 @@ public partial class BubbleWindow : Window
 
     void StartSession()
     {
-        session = new ClaudeSession(settings);
+        session = new ClaudeSession(settings, resumeId);
         session.Text += t => { lock (gate) pending.Append(t); };
         session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
         session.TurnDone += (err, msg) => Dispatcher.BeginInvoke(() =>
@@ -125,11 +119,62 @@ public partial class BubbleWindow : Window
         });
     }
 
+    // ---------- hotkey entry points ----------
+
+    /// A new capture for this conversation. Replaces any attachments that weren't sent yet.
+    public void AttachContext(CapturedContext ctx, int hotkey)
+    {
+        pendingCtx = ctx;
+        pendingHotkey = hotkey;
+        contextReady = false;
+        sendRequested = false;
+
+        attachments.Clear();
+        Attachments.Children.Clear();
+        Attachments.Visibility = Visibility.Visible;
+        BuildAttachments(ctx);
+        UpdatePlaceholder();
+
+        anchorX = ctx.CursorX; anchorY = ctx.CursorY;
+        var wa = WF.Screen.FromPoint(new System.Drawing.Point(anchorX, anchorY)).WorkingArea;
+        anchorBelow = anchorY < wa.Top + wa.Height * 0.55;
+        if (IsLoaded && !userMoved) PlaceNearCursor();
+    }
+
+    /// Pressing the same hotkey again while its capture is still unsent means "send it".
+    public bool CanSendAsIs(int hotkey) => !closed && pendingCtx != null && pendingHotkey == hotkey;
+
+    public void SendAsIs()
+    {
+        if (!contextReady || streaming) { sendRequested = true; return; }
+        sendRequested = false;
+        var text = Input.Text;
+        Input.Clear();
+        Send(text);
+    }
+
+    /// Called once the selected text has been grabbed (or skipped) for this capture.
+    public void ContextReady(CapturedContext ctx)
+    {
+        if (closed || ctx != pendingCtx) return;
+        contextReady = true;
+        if (ctx.SelectedText != null)
+            AddAttachment("selection", "Selection", null, Preview(ctx.SelectedText), "", "Selection",
+                          at: attachments.Count > 0 && attachments[0].Kind == "screen" ? 1 : 0);
+        UpdatePlaceholder();
+
+        Native.ForceForeground(new WindowInteropHelper(this).Handle);
+        Activate();
+        Input.Focus();
+
+        if (sendRequested) SendAsIs();
+    }
+
     // ---------- attachments ----------
 
-    void BuildAttachments()
+    void BuildAttachments(CapturedContext ctx)
     {
-        AddAttachment("screen", "Screen", ScreenChip(), $"Screenshot + mouse position\n{ctx.ScreenshotPath}");
+        AddAttachment("screen", "Screen", ScreenChip(ctx), $"Screenshot + mouse marker\n{ctx.ScreenshotPath}", open: ctx.ScreenshotPath);
         if (ctx.HasClipboard)
         {
             string label = ctx.ClipboardText != null ? "Clipboard"
@@ -139,19 +184,16 @@ public partial class BubbleWindow : Window
         }
     }
 
-    FrameworkElement ScreenChip()
+    static FrameworkElement ScreenChip(CapturedContext ctx) => new Border
     {
-        var thumb = new Border
-        {
-            Width = 34, Height = 22, CornerRadius = new CornerRadius(4),
-            Background = new ImageBrush(Thumbnail(ctx.FullJpeg)) { Stretch = Stretch.UniformToFill },
-            BorderBrush = Frozen(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(1),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        return thumb;
-    }
+        Width = 34, Height = 22, CornerRadius = new CornerRadius(4),
+        Background = new ImageBrush(Thumbnail(ctx.FullJpeg)) { Stretch = Stretch.UniformToFill },
+        BorderBrush = Frozen(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(1),
+        VerticalAlignment = VerticalAlignment.Center,
+    };
 
-    void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip, string? glyph = null, string? text = null, int? at = null)
+    void AddAttachment(string kind, string label, FrameworkElement? visual, string? tip,
+                       string? glyph = null, string? text = null, int? at = null, string? open = null)
     {
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         if (visual != null) sp.Children.Add(visual);
@@ -171,15 +213,13 @@ public partial class BubbleWindow : Window
             Padding = new Thickness(3, 3, 6, 3), Margin = new Thickness(0, 0, 4, 0), Height = 30,
         };
         if (!string.IsNullOrEmpty(tip)) chip.ToolTip = tip;
-        if (kind == "screen") { thumbOpen(chip); }
+        if (open != null) chip.MouseLeftButtonUp += (_, e) => { if (!e.Handled) Open(open); };
 
         var a = new Attachment(kind, label, chip);
         x.MouseLeftButtonUp += (_, e) => { e.Handled = true; RemoveAttachment(a); };
         int i = Math.Clamp(at ?? attachments.Count, 0, attachments.Count);
         attachments.Insert(i, a);
         Attachments.Children.Insert(i, chip);
-
-        void thumbOpen(Border b) => b.MouseLeftButtonUp += (_, e) => { if (!e.Handled) Open(ctx.ScreenshotPath); };
     }
 
     void RemoveAttachment(Attachment a)
@@ -192,8 +232,8 @@ public partial class BubbleWindow : Window
 
     void UpdatePlaceholder()
     {
-        if (contextSent) Placeholder.Text = "Ask a follow-up…";
-        else if (attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
+        if (pendingCtx != null && attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
+        else if (HasConversation) Placeholder.Text = "Ask a follow-up…";
         else Placeholder.Text = "Ask Claude…";
         Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -204,8 +244,8 @@ public partial class BubbleWindow : Window
     {
         text = text.Trim();
         if (streaming || closed) return;
-        bool firstTurn = !contextSent;
-        if (text.Length == 0 && !(firstTurn && attachments.Count > 0)) return;
+        var ctx = pendingCtx;
+        if (text.Length == 0 && !(ctx != null && attachments.Count > 0)) return;
 
         if (session == null)
         {
@@ -216,7 +256,7 @@ public partial class BubbleWindow : Window
         var blocks = new List<object>();
         string body = text.Length > 0 ? text : settings.Instruction;
         string? attachLine = null;
-        if (firstTurn)
+        if (ctx != null)
         {
             ctx.IncludeScreen = attachments.Any(a => a.Kind == "screen");
             ctx.IncludeSelection = attachments.Any(a => a.Kind == "selection");
@@ -224,7 +264,8 @@ public partial class BubbleWindow : Window
             blocks.AddRange(ctx.ImageBlocks());
             body = ctx.ContextText() + "\n\n" + body;
             attachLine = attachments.Count > 0 ? string.Join(" · ", attachments.Select(a => a.Label)) : null;
-            contextSent = true;
+
+            pendingCtx = null;
             attachments.Clear();
             Attachments.Children.Clear();
             Attachments.Visibility = Visibility.Collapsed;
@@ -308,14 +349,20 @@ public partial class BubbleWindow : Window
             if (current != null && current.Text.Length == 0) Messages.Children.Remove(current);
             AddError(doneInfo.msg ?? "Something went wrong.");
         }
-        else if (current != null) current.Text = current.Text.TrimEnd();
+        else if (current != null)
+        {
+            current.Text = current.Text.TrimEnd();
+            History.Add(new Turn(false, current.Text, null));
+        }
         if (IsActive) Input.Focus();
+        if (sendRequested && contextReady) SendAsIs();
     }
 
     // ---------- conversation UI ----------
 
     void AddUserBubble(string text, string? attachLine)
     {
+        History.Add(new Turn(true, text, attachLine));
         var sp = new StackPanel();
         if (attachLine != null)
         {
@@ -339,6 +386,15 @@ public partial class BubbleWindow : Window
             Margin = new Thickness(48, 8, 0, 6),
             HorizontalAlignment = HorizontalAlignment.Right,
         });
+    }
+
+    void AddAssistantText(string text)
+    {
+        History.Add(new Turn(false, text, null));
+        var tb = MakeText(text, Fg);
+        tb.Margin = new Thickness(0, 4, 0, 8);
+        Messages.Children.Add(tb);
+        current = tb;
     }
 
     void AddError(string text)
@@ -373,13 +429,13 @@ public partial class BubbleWindow : Window
         if (hwnd == IntPtr.Zero) return;
         Native.GetWindowRect(hwnd, out var r);
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
-        var wa = WF.Screen.FromPoint(new System.Drawing.Point(ctx.CursorX, ctx.CursorY)).WorkingArea;
+        var wa = WF.Screen.FromPoint(new System.Drawing.Point(anchorX, anchorY)).WorkingArea;
 
-        int x = ctx.CursorX - 8;
-        if (x + w > wa.Right) x = ctx.CursorX - w + 8;
+        int x = anchorX - 8;
+        if (x + w > wa.Right) x = anchorX - w + 8;
         x = Math.Clamp(x, wa.Left, Math.Max(wa.Left, wa.Right - w));
 
-        int y = anchorBelow ? ctx.CursorY + 6 : ctx.CursorY - h - 6;
+        int y = anchorBelow ? anchorY + 6 : anchorY - h - 6;
         y = Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - h));
 
         if (x != r.Left || y != r.Top)
@@ -417,7 +473,7 @@ public partial class BubbleWindow : Window
     {
         if (streaming) return;
         var text = Input.Text;
-        if (text.Trim().Length == 0 && (contextSent || attachments.Count == 0)) return;
+        if (text.Trim().Length == 0 && (pendingCtx == null || attachments.Count == 0)) return;
         Input.Clear();
         Send(text);
     }

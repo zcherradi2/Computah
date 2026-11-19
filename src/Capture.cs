@@ -49,7 +49,7 @@ public sealed class CapturedContext
     {
         var sb = new StringBuilder();
         int n = 1;
-        sb.AppendLine($"[Desktop context captured with Ctrl+Alt+A at {Time:yyyy-MM-dd HH:mm:ss}]");
+        sb.AppendLine($"[New desktop context captured with the hotkey at {Time:yyyy-MM-dd HH:mm:ss}]");
         sb.AppendLine("Focused app at capture time:");
         sb.AppendLine($"  Id: {ProcessId}");
         sb.AppendLine($"  ProcessName: {ProcessName}");

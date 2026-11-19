@@ -22,8 +22,9 @@ sealed class ClaudeSession : IDisposable
     public event Action<string>? Status;        // background thread
     public event Action<bool, string?>? TurnDone; // (isError, message) background thread
 
-    public ClaudeSession(Settings s)
+    public ClaudeSession(Settings s, string? resumeId = null)
     {
+        SessionId = resumeId;
         var psi = new ProcessStartInfo(FindClaude())
         {
             UseShellExecute = false,
@@ -39,6 +40,7 @@ sealed class ClaudeSession : IDisposable
         foreach (var a in new[] { "-p", "--input-format", "stream-json", "--output-format", "stream-json",
                                   "--verbose", "--include-partial-messages" })
             psi.ArgumentList.Add(a);
+        if (resumeId != null) { psi.ArgumentList.Add("--resume"); psi.ArgumentList.Add(resumeId); }
         if (!string.IsNullOrWhiteSpace(s.Model)) { psi.ArgumentList.Add("--model"); psi.ArgumentList.Add(s.Model); }
         if (!string.IsNullOrWhiteSpace(s.SystemPrompt)) { psi.ArgumentList.Add("--append-system-prompt"); psi.ArgumentList.Add(s.SystemPrompt); }
         if (!string.IsNullOrWhiteSpace(s.AllowedTools)) { psi.ArgumentList.Add("--allowedTools"); psi.ArgumentList.Add(s.AllowedTools); }

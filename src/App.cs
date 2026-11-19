@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
@@ -31,14 +33,19 @@ public static class Program
 
 sealed class AssistHost : IDisposable
 {
-    const int HotkeyId = 1;
+    const int HotkeyContinue = 1; // Ctrl+Alt+A: add to the latest session
+    const int HotkeyNew = 2;      // Alt+A: start a new session
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "ClaudeAssist";
 
     readonly Application app;
     readonly HwndSource msgWindow;
     readonly WF.NotifyIcon tray;
-    bool busy;
-    BubbleWindow? active;
+    bool busy, sendQueued;
+    int busyHotkey;
+
+    readonly List<BubbleWindow> open = new();   // open bubbles, newest last
+    string? lastSessionId;                      // latest conversation, kept after its bubble closes
+    List<Turn>? lastHistory;
 
     public AssistHost(Application app)
     {
@@ -49,9 +56,10 @@ sealed class AssistHost : IDisposable
         { ParentWindow = new IntPtr(-3), WindowStyle = 0, Width = 0, Height = 0 });
         msgWindow.AddHook(WndProc);
 
-        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Claude Assist — Ctrl+Alt+A", Visible = true };
+        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Claude Assist — Alt+A new, Ctrl+Alt+A continue", Visible = true };
         var menu = new WF.ContextMenuStrip();
-        menu.Items.Add("Ask Claude  (Ctrl+Alt+A, again to send)", null, (_, _) => Trigger());
+        menu.Items.Add("New session  (Alt+A)", null, (_, _) => Trigger(HotkeyNew));
+        menu.Items.Add("Continue latest session  (Ctrl+Alt+A)", null, (_, _) => Trigger(HotkeyContinue));
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Open screenshots folder", null, (_, _) => Shell(Paths.Screenshots, true));
         menu.Items.Add("Edit settings", null, (_, _) => { Settings.Load(); Shell(Paths.SettingsFile, false); });
@@ -62,10 +70,15 @@ sealed class AssistHost : IDisposable
         menu.Items.Add("Exit", null, (_, _) => app.Shutdown());
         tray.ContextMenuStrip = menu;
 
-        if (!Native.RegisterHotKey(msgWindow.Handle, HotkeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A))
-            tray.ShowBalloonTip(4000, "Claude Assist", "Ctrl+Alt+A is already used by another app.", WF.ToolTipIcon.Warning);
+        var failed = new List<string>();
+        if (!Native.RegisterHotKey(msgWindow.Handle, HotkeyContinue, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A))
+            failed.Add("Ctrl+Alt+A");
+        if (!Native.RegisterHotKey(msgWindow.Handle, HotkeyNew, Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A))
+            failed.Add("Alt+A");
+        if (failed.Count > 0)
+            tray.ShowBalloonTip(4000, "Claude Assist", string.Join(" and ", failed) + " already used by another app.", WF.ToolTipIcon.Warning);
         else
-            tray.ShowBalloonTip(2500, "Claude Assist is running", "Press Ctrl+Alt+A anywhere.", WF.ToolTipIcon.None);
+            tray.ShowBalloonTip(2500, "Claude Assist is running", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
 
         Settings.Load(); // creates settings.json on first run
     }
@@ -75,27 +88,37 @@ sealed class AssistHost : IDisposable
         if (msg == Native.WM_HOTKEY)
         {
             handled = true;
-            Trigger();
+            Trigger(wParam.ToInt32());
         }
         return IntPtr.Zero;
     }
 
-    /// First press: capture + compact input. Press again while that input is open and unsent: send it as is.
-    async void Trigger()
+    /// First press captures the screen into a compact input; pressing the same hotkey again sends it as is.
+    /// Alt+A always starts a new session. Ctrl+Alt+A adds to the newest open bubble, or reopens the last
+    /// closed conversation (claude --resume), or starts fresh if there is none.
+    async void Trigger(int hotkey)
     {
-        if (active is { CanSendAsIs: true }) { active.SendAsIs(); return; }
-        if (busy) return;
+        var newest = open.Count > 0 ? open[^1] : null;
+        if (newest != null && newest.CanSendAsIs(hotkey)) { newest.SendAsIs(); return; }
+        if (busy) { if (hotkey == busyHotkey) sendQueued = true; return; } // fast double press during capture
         busy = true;
+        busyHotkey = hotkey;
+        sendQueued = false;
         try
         {
             var settings = Settings.Load();
             var ctx = await ContextCapture.CaptureAsync(settings);
-            var w = new BubbleWindow(ctx, settings);
-            active = w;
-            w.Closed += (_, _) => { if (active == w) active = null; };
-            w.Show();
+
+            BubbleWindow w;
+            if (hotkey == HotkeyContinue && newest != null) w = newest;
+            else if (hotkey == HotkeyContinue && lastSessionId != null) w = Track(new BubbleWindow(settings, lastSessionId, lastHistory));
+            else w = Track(new BubbleWindow(settings));
+
+            w.AttachContext(ctx, hotkey);
+            if (!w.IsVisible) w.Show();
+            if (sendQueued) w.SendAsIs(); // runs once the selection grab finishes
             await ContextCapture.GrabSelectionAsync(ctx, settings);
-            w.ContextReady();
+            w.ContextReady(ctx);
         }
         catch (Exception ex)
         {
@@ -103,6 +126,21 @@ sealed class AssistHost : IDisposable
             tray.ShowBalloonTip(4000, "Claude Assist", ex.Message, WF.ToolTipIcon.Error);
         }
         finally { busy = false; }
+    }
+
+    BubbleWindow Track(BubbleWindow w)
+    {
+        open.Add(w);
+        w.Closed += (_, _) =>
+        {
+            open.Remove(w);
+            if (w.HasConversation && w.SessionId != null)
+            {
+                lastSessionId = w.SessionId;
+                lastHistory = w.History.ToList();
+            }
+        };
+        return w;
     }
 
     static void Shell(string path, bool folder)
@@ -146,7 +184,8 @@ sealed class AssistHost : IDisposable
 
     public void Dispose()
     {
-        Native.UnregisterHotKey(msgWindow.Handle, HotkeyId);
+        Native.UnregisterHotKey(msgWindow.Handle, HotkeyContinue);
+        Native.UnregisterHotKey(msgWindow.Handle, HotkeyNew);
         tray.Visible = false;
         tray.Dispose();
         msgWindow.Dispose();
