@@ -530,6 +530,8 @@ public partial class BubbleWindow : Window
             }
             else if (wantsControl && mode == "off") AddPermissionCard();
         }
+        // the end of an action loop (a reply with no further actions): back to the keyboard
+        if (focusAfterTurn && !acting && (doneInfo.err || acts.Count == 0)) FocusInput();
 
         if (sendRequested && contextReady && !acting) SendAsIs();
     }
@@ -711,8 +713,26 @@ public partial class BubbleWindow : Window
             AddNote("Done.");
             if (res.Look) pendingReport = $"[Computah] Ran your actions ({doneText}), but stopped the automatic look-loop after {autoTurns} rounds.";
             else pendingReport = $"[Computah] Ran your actions: {doneText}.";
+            FocusInput(); // finished: ready for the next message
         }
+        if (shot != null) focusAfterTurn = true; // the agent looks and replies: focus once that loop ends
         Changed?.Invoke();
+    }
+
+    bool focusAfterTurn; // set while an action loop runs: when it ends, bring the chat back to the keyboard
+
+    /// Bring the bubble to the front with the cursor in the message box, ready to type.
+    void FocusInput()
+    {
+        focusAfterTurn = false;
+        if (closed) return;
+        ShowBubble(activate: true);
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
+        {
+            Input.Focus();
+            Keyboard.Focus(Input);
+            Input.CaretIndex = Input.Text.Length;
+        });
     }
 
     /// The cartoon hand briefly shows where a click is about to land.
