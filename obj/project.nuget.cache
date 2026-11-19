@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "vD2togrgrb4=",
+  "dgSpecHash": "XkKpwJItSkY=",
   "success": true,
   "projectFilePath": "C:\\Users\\pc\\Desktop\\assist\\Computah.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\pc\\.nuget\\packages\\avalonedit\\6.3.1.120\\avalonedit.6.3.1.120.nupkg.sha512"
+  ],
   "logs": []
 }

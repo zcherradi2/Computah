@@ -63,6 +63,9 @@ static class Agents
                 if (!s.LoadMcpServers) a.Add("--strict-mcp-config");
                 // Never let the agent open the saved screenshots on its own.
                 a.Add("--disallowedTools"); a.Add($"Read({Paths.Screenshots.Replace('\\', '/')}/**)");
+                // Shared files and folders are read-only for the agent (Edit rules cover every file-editing tool).
+                foreach (var p in shared)
+                    a.Add($"Edit({p.Replace('\\', '/') + (Directory.Exists(p) ? "/**" : "")})");
                 return a;
             },
             TitleArgs = () => new List<string> { "-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--strict-mcp-config" },

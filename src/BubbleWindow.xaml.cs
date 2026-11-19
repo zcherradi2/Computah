@@ -63,6 +63,7 @@ public partial class BubbleWindow : Window
     IntPtr lastTarget;         // the app the user was in at the latest capture
     int autoTurns;             // look → act → look loop guard
     string? pendingReport;     // told to the agent with the next message (stopped/declined actions)
+    readonly List<HintTag> turnAccess = new(); // <request-access/> tags in the current reply
 
     public List<Turn> History { get; } = new();
     public string? SessionId => session?.SessionId ?? resumeId;
@@ -171,6 +172,7 @@ public partial class BubbleWindow : Window
                 if (hints.Count > 0) ShowHints(hints);
                 turnActions.AddRange(tags.Where(x => x.Name == "action"));
                 if (tags.Any(x => x.Name == "request-control")) turnWantsControl = true;
+                turnAccess.AddRange(tags.Where(x => x.Name == "request-access"));
             });
         };
         session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
@@ -426,6 +428,7 @@ public partial class BubbleWindow : Window
         hintFilter.Reset();
         turnActions.Clear();
         turnWantsControl = false;
+        turnAccess.Clear();
         hintTurn++;
         try { session!.Send(blocks); }
         catch (Exception ex)
@@ -508,10 +511,13 @@ public partial class BubbleWindow : Window
         // Actions / control requests from this reply.
         var acts = turnActions.ToList();
         bool wantsControl = turnWantsControl;
+        var access = turnAccess.ToList();
         turnActions.Clear();
         turnWantsControl = false;
+        turnAccess.Clear();
         if (!doneInfo.err)
         {
+            if (access.Count > 0) AddAccessCard(access);
             var mode = Settings.Load().Control;
             if (acts.Count > 0)
             {
@@ -563,6 +569,55 @@ public partial class BubbleWindow : Window
                    ". Do what they asked now by writing <action/> tags in your reply (coordinates from the latest screenshot), " +
                    "ending with <action type=\"look\"/> if you need to check the result.";
         Dispatch(new List<object> { new { type = "text", text = note } }, "", "Computah: control allowed");
+    }
+
+    // ---------- file access ----------
+
+    /// The agent asked to read files/folders it can't reach: ask the user, then restart it with access and continue.
+    void AddAccessCard(List<HintTag> requests)
+    {
+        var paths = new List<string>();
+        var missing = new List<string>();
+        foreach (var r in requests)
+        {
+            var raw = r.Get("path");
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var p = Environment.ExpandEnvironmentVariables(raw.Trim().Trim('"')).Replace('/', '\\');
+            try { p = System.IO.Path.GetFullPath(p); } catch { missing.Add(raw); continue; }
+            if (!System.IO.Directory.Exists(p) && !System.IO.File.Exists(p)) { missing.Add(raw); continue; }
+            if (sharedPaths.Contains(p, StringComparer.OrdinalIgnoreCase)) continue; // already has it
+            if (!paths.Contains(p, StringComparer.OrdinalIgnoreCase)) paths.Add(p);
+        }
+        if (paths.Count == 0)
+        {
+            if (missing.Count > 0) pendingReport = $"[Computah] These paths don't exist, so no access was asked for: {string.Join(", ", missing)}";
+            return;
+        }
+
+        var reason = requests.Select(r => r.Get("reason")).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        var body = string.Join("\n", paths.Select(p => (System.IO.Directory.Exists(p) ? "📁 " : "📄 ") + p))
+                 + (reason != null ? $"\n\nWhy: {reason}" : "")
+                 + "\n\nIt can read and search them for this conversation only. It can't change or delete anything.";
+        var card = Card($"Let {agent.Name} read {(paths.Count == 1 ? "this" : "these")}?", body);
+        var buttons = (StackPanel)((StackPanel)card.Child).Children[2];
+        buttons.Children.Add(CardButton("Allow", true, () =>
+        {
+            foreach (var p in paths) if (!sharedPaths.Contains(p, StringComparer.OrdinalIgnoreCase)) sharedPaths.Add(p);
+            Changed?.Invoke(); // saved with the session
+            Resolve(card, "Access allowed.");
+            var note = "[Computah] The user gave you read access to:\n" + string.Join("\n", paths.Select(p => "- " + p)) +
+                       "\nUse your file tools (read, list, search) on these paths now and continue with what they asked.";
+            Dispatch(new List<object> { new { type = "text", text = note } }, "", "Computah: read access allowed");
+        }));
+        buttons.Children.Add(CardButton("Not now", false, () =>
+        {
+            Resolve(card, "Access not allowed.");
+            pendingReport = "[Computah] The user did not give you access to: " + string.Join(", ", paths) +
+                            ". Don't ask again for these unless they bring it up; help with what you can.";
+        }));
+        Messages.Children.Add(card);
+        Scroller.ScrollToEnd();
+        ShowBubble(activate: true);
     }
 
     void AddApprovalCard(List<HintTag> acts)
@@ -716,7 +771,21 @@ public partial class BubbleWindow : Window
     /// Draw the agent's hints on the monitor of the latest screenshot. A new reply replaces older hints.
     void ShowHints(List<HintTag> hints)
     {
-        if (lastScreen == null || closed) return; // no screenshot in this conversation: nothing to point at
+        if (closed) return;
+        // files and folders pop up as their own cards: no screenshot needed
+        var peeks = hints.Where(h => h.Type is "file" or "folder" or "open").ToList();
+        if (peeks.Count > 0)
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            var wa = System.Windows.Forms.Screen.FromHandle(hwnd).WorkingArea;
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var dips = new Rect(wa.Left / dpi.DpiScaleX, wa.Top / dpi.DpiScaleY, wa.Width / dpi.DpiScaleX, wa.Height / dpi.DpiScaleY);
+            foreach (var p in peeks.Take(3))
+                if (!PeekWindow.Show(p, dips)) AddNote($"Couldn't find {p.Get("path") ?? "that file"}.");
+            hints = hints.Except(peeks).ToList();
+            if (hints.Count == 0) return;
+        }
+        if (lastScreen == null) return; // no screenshot in this conversation: nothing to point at
         if (overlay != null && (overlayTurn != hintTurn || !overlay.IsVisible || overlay.MonitorRect != lastScreen.Monitor))
         {
             overlay.Close();

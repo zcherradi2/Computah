@@ -34,7 +34,7 @@ public sealed class HintTag
 public sealed class HintFilter
 {
     static readonly Regex AttrRx = new("([\\w-]+)\\s*=\\s*\"([^\"]*)\"", RegexOptions.Compiled);
-    static readonly string[] Names = { "hint", "action", "request-control" };
+    static readonly string[] Names = { "hint", "action", "request-control", "request-access" };
     readonly StringBuilder hold = new();
     string? name; // tag name once recognised
     bool inQuote;

@@ -42,9 +42,9 @@ sealed class AgentSession : IDisposable
             instructions = "Instructions for this whole conversation:\n" + Prompts.Build(s);
         else if (resumeId != null)
             // A resumed conversation keeps the system prompt it started with (agents ignore a new one on resume),
-            // so the current control permission is restated in the next message.
-            instructions = "[Computah update: these instructions replace any earlier ones about mouse and keyboard control]\n" +
-                           Prompts.ControlSection(s);
+            // so the current Computah instructions (features, file access, control permission) are restated.
+            instructions = "[Computah update: these are the current Computah instructions; they replace any earlier ones]\n" +
+                           Prompts.Build(s);
 
         var psi = new ProcessStartInfo(agent.Path ?? throw new FileNotFoundException($"{agent.Name} is not installed"))
         {
