@@ -11,12 +11,12 @@ using System;
 using System.Reflection;
 
 [assembly: System.Reflection.AssemblyMetadataAttribute("ProjectDir", "C:\\Users\\pc\\Desktop\\assist")]
-[assembly: System.Reflection.AssemblyCompanyAttribute("ClaudeAssist")]
+[assembly: System.Reflection.AssemblyCompanyAttribute("Computah")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+954a8ad7fb24cea74ffd6d70666499ac5e17b701")]
-[assembly: System.Reflection.AssemblyProductAttribute("ClaudeAssist")]
-[assembly: System.Reflection.AssemblyTitleAttribute("ClaudeAssist")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+872851fbf3c746e013a3a9ba8ec462566fc8bf62")]
+[assembly: System.Reflection.AssemblyProductAttribute("Computah")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Computah")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]

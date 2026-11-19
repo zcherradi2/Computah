@@ -1,15 +1,15 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\pc\\Desktop\\assist\\ClaudeAssist.csproj": {}
+    "C:\\Users\\pc\\Desktop\\assist\\Computah.csproj": {}
   },
   "projects": {
-    "C:\\Users\\pc\\Desktop\\assist\\ClaudeAssist.csproj": {
+    "C:\\Users\\pc\\Desktop\\assist\\Computah.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\pc\\Desktop\\assist\\ClaudeAssist.csproj",
-        "projectName": "ClaudeAssist",
-        "projectPath": "C:\\Users\\pc\\Desktop\\assist\\ClaudeAssist.csproj",
+        "projectUniqueName": "C:\\Users\\pc\\Desktop\\assist\\Computah.csproj",
+        "projectName": "Computah",
+        "projectPath": "C:\\Users\\pc\\Desktop\\assist\\Computah.csproj",
         "packagesPath": "C:\\Users\\pc\\.nuget\\packages\\",
         "outputPath": "C:\\Users\\pc\\Desktop\\assist\\obj\\",
         "projectStyle": "PackageReference",

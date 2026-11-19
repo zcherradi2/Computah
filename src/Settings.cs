@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -21,7 +21,7 @@ static class Paths
     {
         get
         {
-            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeAssist", "workspace");
+            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Computah", "workspace");
             Directory.CreateDirectory(d);
             return d;
         }

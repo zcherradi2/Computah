@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -19,7 +19,7 @@ public static class Program
     [STAThread]
     public static void Main()
     {
-        using var mutex = new Mutex(true, "ClaudeAssist_SingleInstance_v1", out bool first);
+        using var mutex = new Mutex(true, "Computah_SingleInstance_v1", out bool first);
         if (!first) return;
 
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -35,7 +35,7 @@ sealed class AssistHost : IDisposable
 {
     const int HotkeyContinue = 1; // Ctrl+Alt+A: add to the latest session
     const int HotkeyNew = 2;      // Alt+A: start a new session
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "ClaudeAssist";
+    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "Computah";
 
     readonly Application app;
     readonly HwndSource msgWindow;
@@ -52,11 +52,11 @@ sealed class AssistHost : IDisposable
         this.app = app;
 
         // Message-only window that receives WM_HOTKEY.
-        msgWindow = new HwndSource(new HwndSourceParameters("ClaudeAssistHotkeys")
+        msgWindow = new HwndSource(new HwndSourceParameters("ComputahHotkeys")
         { ParentWindow = new IntPtr(-3), WindowStyle = 0, Width = 0, Height = 0 });
         msgWindow.AddHook(WndProc);
 
-        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Claude Assist — Alt+A new, Ctrl+Alt+A continue", Visible = true };
+        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Computah â€” Alt+A new, Ctrl+Alt+A continue", Visible = true };
         var menu = new WF.ContextMenuStrip();
         menu.Items.Add("New session  (Alt+A)", null, (_, _) => Trigger(HotkeyNew));
         menu.Items.Add("Continue latest session  (Ctrl+Alt+A)", null, (_, _) => Trigger(HotkeyContinue));
@@ -76,9 +76,9 @@ sealed class AssistHost : IDisposable
         if (!Native.RegisterHotKey(msgWindow.Handle, HotkeyNew, Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A))
             failed.Add("Alt+A");
         if (failed.Count > 0)
-            tray.ShowBalloonTip(4000, "Claude Assist", string.Join(" and ", failed) + " already used by another app.", WF.ToolTipIcon.Warning);
+            tray.ShowBalloonTip(4000, "Computah", string.Join(" and ", failed) + " already used by another app.", WF.ToolTipIcon.Warning);
         else
-            tray.ShowBalloonTip(2500, "Claude Assist is running", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
+            tray.ShowBalloonTip(2500, "Computah is running", "Alt+A: new session Â· Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
 
         Settings.Load(); // creates settings.json on first run
     }
@@ -123,7 +123,7 @@ sealed class AssistHost : IDisposable
         catch (Exception ex)
         {
             Paths.Log("trigger: " + ex);
-            tray.ShowBalloonTip(4000, "Claude Assist", ex.Message, WF.ToolTipIcon.Error);
+            tray.ShowBalloonTip(4000, "Computah", ex.Message, WF.ToolTipIcon.Error);
         }
         finally { busy = false; }
     }
@@ -166,20 +166,11 @@ sealed class AssistHost : IDisposable
         else k.DeleteValue(RunName, false);
     }
 
+    /// The embedded computah.ico at the tray's size for the current DPI.
     static Icon MakeIcon()
     {
-        using var bmp = new Bitmap(32, 32);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            using var bg = new SolidBrush(Color.FromArgb(217, 119, 87));
-            g.FillEllipse(bg, 1, 1, 30, 30);
-            using var font = new Font("Segoe UI Semibold", 15f, GraphicsUnit.Pixel);
-            var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString("A", font, Brushes.White, new RectangleF(0, 1, 32, 32), fmt);
-        }
-        return Icon.FromHandle(bmp.GetHicon());
+        using var s = typeof(AssistHost).Assembly.GetManifestResourceStream("computah.ico")!;
+        return new Icon(s, WF.SystemInformation.SmallIconSize);
     }
 
     public void Dispose()

@@ -156,7 +156,7 @@ namespace Assist {
                 return;
             }
             _contentLoaded = true;
-            System.Uri resourceLocater = new System.Uri("/ClaudeAssist;component/src/bubblewindow.xaml", System.UriKind.Relative);
+            System.Uri resourceLocater = new System.Uri("/Computah;component/src/bubblewindow.xaml", System.UriKind.Relative);
             
             #line 1 "..\..\..\..\src\BubbleWindow.xaml"
             System.Windows.Application.LoadComponent(this, resourceLocater);

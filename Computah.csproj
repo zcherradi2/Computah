@@ -7,12 +7,17 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>ClaudeAssist</AssemblyName>
+    <AssemblyName>Computah</AssemblyName>
     <RootNamespace>Assist</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>computah.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);WFDEV005;WFO0003;WFDEV006;SYSLIB0050;CA1416</NoWarn>
     <DefaultItemExcludes>$(DefaultItemExcludes);app/**;screenshots/**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="computah.ico" LogicalName="computah.ico" />
+  </ItemGroup>
 
   <!-- Bakes the project folder into the exe so screenshots/settings live here. -->
   <ItemGroup>

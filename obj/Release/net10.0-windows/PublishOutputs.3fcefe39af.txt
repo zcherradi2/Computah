@@ -1,5 +1,5 @@
-C:\Users\pc\Desktop\assist\app\ClaudeAssist.exe
-C:\Users\pc\Desktop\assist\app\ClaudeAssist.dll
-C:\Users\pc\Desktop\assist\app\ClaudeAssist.deps.json
-C:\Users\pc\Desktop\assist\app\ClaudeAssist.runtimeconfig.json
-C:\Users\pc\Desktop\assist\app\ClaudeAssist.pdb
+C:\Users\pc\Desktop\assist\app\Computah.exe
+C:\Users\pc\Desktop\assist\app\Computah.dll
+C:\Users\pc\Desktop\assist\app\Computah.deps.json
+C:\Users\pc\Desktop\assist\app\Computah.runtimeconfig.json
+C:\Users\pc\Desktop\assist\app\Computah.pdb
