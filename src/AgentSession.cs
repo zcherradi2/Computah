@@ -9,23 +9,28 @@ using System.Threading.Tasks;
 
 namespace Assist;
 
-/// One long-lived `claude -p` process in stream-json mode = one conversation.
+/// One long-lived agent process (Claude Code, Qwen Code, …) in stream-json mode = one conversation.
 /// Follow-up messages are written to the same process, so context is kept and replies start fast.
-sealed class ClaudeSession : IDisposable
+sealed class AgentSession : IDisposable
 {
     readonly Process proc;
     readonly StringBuilder stderr = new();
+    readonly string? instructions; // sent with the first message when the agent has no system-prompt flag
     volatile bool inTurn, turnHasText, disposed;
+    bool sentInstructions;
 
     public string? SessionId { get; private set; }
     public event Action<string>? Text;          // background thread
     public event Action<string>? Status;        // background thread
     public event Action<bool, string?>? TurnDone; // (isError, message) background thread
 
-    public ClaudeSession(Settings s, string? resumeId = null)
+    public AgentSession(Settings s, AgentInfo agent, string? resumeId = null)
     {
         SessionId = resumeId;
-        var psi = new ProcessStartInfo(FindClaude())
+        if (!agent.SupportsSystemPromptFlag && resumeId == null && !string.IsNullOrWhiteSpace(s.SystemPrompt))
+            instructions = s.SystemPrompt;
+
+        var psi = new ProcessStartInfo(agent.Path ?? throw new FileNotFoundException($"{agent.Name} is not installed"))
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -37,23 +42,13 @@ sealed class ClaudeSession : IDisposable
             StandardErrorEncoding = new UTF8Encoding(false),
             StandardInputEncoding = new UTF8Encoding(false),
         };
-        foreach (var a in new[] { "-p", "--input-format", "stream-json", "--output-format", "stream-json",
-                                  "--verbose", "--include-partial-messages" })
-            psi.ArgumentList.Add(a);
-        if (resumeId != null) { psi.ArgumentList.Add("--resume"); psi.ArgumentList.Add(resumeId); }
-        if (!string.IsNullOrWhiteSpace(s.Model)) { psi.ArgumentList.Add("--model"); psi.ArgumentList.Add(s.Model); }
-        if (!string.IsNullOrWhiteSpace(s.SystemPrompt)) { psi.ArgumentList.Add("--append-system-prompt"); psi.ArgumentList.Add(s.SystemPrompt); }
-        if (!string.IsNullOrWhiteSpace(s.AllowedTools)) { psi.ArgumentList.Add("--allowedTools"); psi.ArgumentList.Add(s.AllowedTools); }
-        if (!s.LoadMcpServers) psi.ArgumentList.Add("--strict-mcp-config");
-        // Belt and braces: never let Claude open the saved screenshots on its own.
-        psi.ArgumentList.Add("--disallowedTools");
-        psi.ArgumentList.Add($"Read({Paths.Screenshots.Replace('\\', '/')}/**)");
+        foreach (var a in agent.Args(s, resumeId)) psi.ArgumentList.Add(a);
 
         // Don't let a parent Claude Code session's env leak in.
         psi.Environment.Remove("CLAUDECODE");
         psi.Environment.Remove("CLAUDE_CODE_ENTRYPOINT");
 
-        proc = Process.Start(psi) ?? throw new InvalidOperationException("Could not start claude");
+        proc = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start {agent.Name}");
         Task.Run(ReadLoop);
         Task.Run(async () =>
         {
@@ -67,6 +62,12 @@ sealed class ClaudeSession : IDisposable
     {
         turnHasText = false;
         inTurn = true;
+        if (instructions != null && SessionId == null && !sentInstructions)
+        {
+            content = new List<object>(content);
+            content.Insert(0, new { type = "text", text = "Instructions for this whole conversation:\n" + instructions });
+            sentInstructions = true;
+        }
         var msg = new Dictionary<string, object?>
         {
             ["type"] = "user",
@@ -95,7 +96,7 @@ sealed class ClaudeSession : IDisposable
         {
             inTurn = false;
             string err; lock (stderr) err = stderr.ToString().Trim();
-            TurnDone?.Invoke(true, "Claude exited unexpectedly." + (err.Length > 0 ? "\n" + Tail(err, 600) : ""));
+            TurnDone?.Invoke(true, "The agent exited unexpectedly." +(err.Length > 0 ? "\n" + Tail(err, 600) : ""));
         }
     }
 
@@ -133,7 +134,14 @@ sealed class ClaudeSession : IDisposable
             case "result":
                 inTurn = false;
                 bool isErr = r.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
-                TurnDone?.Invoke(isErr, isErr ? (Str(r, "result") ?? Str(r, "subtype") ?? "Unknown error") : null);
+                string? errMsg = null;
+                if (isErr)
+                {
+                    errMsg = Str(r, "result");
+                    if (errMsg == null && r.TryGetProperty("error", out var er)) errMsg = Str(er, "message");
+                    errMsg ??= Str(r, "subtype") ?? "Unknown error";
+                }
+                TurnDone?.Invoke(isErr, errMsg);
                 break;
         }
     }
@@ -153,18 +161,6 @@ sealed class ClaudeSession : IDisposable
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
     static string Tail(string s, int n) => s.Length <= n ? s : "…" + s[^n..];
-
-    static string FindClaude()
-    {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in path.Split(Path.PathSeparator).Where(d => d.Length > 0))
-        {
-            try { var f = Path.Combine(dir.Trim('"'), "claude.exe"); if (File.Exists(f)) return f; } catch { }
-        }
-        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "claude.exe");
-        if (File.Exists(local)) return local;
-        throw new FileNotFoundException("claude.exe not found on PATH");
-    }
 
     public void Dispose()
     {

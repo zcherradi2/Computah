@@ -32,6 +32,7 @@ public partial class BubbleWindow : Window
     sealed record Attachment(string Kind, string Label, FrameworkElement Chip);
 
     readonly Settings settings;
+    readonly AgentInfo agent;
     readonly string? resumeId;
     readonly List<Attachment> attachments = new();
 
@@ -43,7 +44,7 @@ public partial class BubbleWindow : Window
     int anchorX, anchorY;
     bool anchorBelow;
 
-    ClaudeSession? session;
+    AgentSession? session;
     bool streaming, userMoved, turnDonePending, closed;
     (bool err, string? msg) doneInfo;
     TextBox? current;
@@ -55,11 +56,15 @@ public partial class BubbleWindow : Window
     public bool HasConversation => History.Count > 0;
     public bool IsClosed => closed;
 
-    public BubbleWindow(Settings settings, string? resumeId = null, IReadOnlyList<Turn>? history = null)
+    public string AgentId => agent.Id;
+
+    public BubbleWindow(Settings settings, AgentInfo agent, string? resumeId = null, IReadOnlyList<Turn>? history = null)
     {
         this.settings = settings;
+        this.agent = agent;
         this.resumeId = resumeId;
         InitializeComponent();
+        AgentLabel.Text = agent.Name;
         ShowActivated = false; // keep focus on the user's app until the selection has been grabbed
 
         if (history is { Count: > 0 })
@@ -86,7 +91,7 @@ public partial class BubbleWindow : Window
 
         // Start claude right away so it is warm by the time the user hits Enter.
         try { StartSession(); }
-        catch (Exception ex) { Expand(); AddError("Couldn't start Claude Code: " + ex.Message); }
+        catch (Exception ex) { Expand(); AddError($"Couldn't start {agent.Name}: " + ex.Message); }
     }
 
     // ---------- lifecycle ----------
@@ -109,7 +114,7 @@ public partial class BubbleWindow : Window
 
     void StartSession()
     {
-        session = new ClaudeSession(settings, resumeId);
+        session = new AgentSession(settings, agent, resumeId);
         session.Text += t => { lock (gate) pending.Append(t); };
         session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
         session.TurnDone += (err, msg) => Dispatcher.BeginInvoke(() =>
@@ -234,7 +239,7 @@ public partial class BubbleWindow : Window
     {
         if (pendingCtx != null && attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
         else if (HasConversation) Placeholder.Text = "Ask a follow-up…";
-        else Placeholder.Text = "Ask Claude…";
+        else Placeholder.Text = $"Ask {agent.Name}…";
         Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -250,7 +255,7 @@ public partial class BubbleWindow : Window
         if (session == null)
         {
             try { StartSession(); }
-            catch (Exception ex) { Expand(); AddError("Couldn't start Claude Code: " + ex.Message); return; }
+            catch (Exception ex) { Expand(); AddError($"Couldn't start {agent.Name}: " + ex.Message); return; }
         }
 
         var blocks = new List<object>();
@@ -285,7 +290,7 @@ public partial class BubbleWindow : Window
         catch (Exception ex)
         {
             SetStreaming(false);
-            AddError("Lost connection to Claude: " + ex.Message);
+            AddError($"Lost connection to {agent.Name}: " + ex.Message);
             session?.Dispose(); session = null;
         }
         Scroller.ScrollToEnd();

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -44,7 +44,7 @@ sealed class AssistHost : IDisposable
     int busyHotkey;
 
     readonly List<BubbleWindow> open = new();   // open bubbles, newest last
-    string? lastSessionId;                      // latest conversation, kept after its bubble closes
+    string? lastSessionId, lastAgentId;         // latest conversation, kept after its bubble closes
     List<Turn>? lastHistory;
 
     public AssistHost(Application app)
@@ -56,11 +56,12 @@ sealed class AssistHost : IDisposable
         { ParentWindow = new IntPtr(-3), WindowStyle = 0, Width = 0, Height = 0 });
         msgWindow.AddHook(WndProc);
 
-        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Computah â€” Alt+A new, Ctrl+Alt+A continue", Visible = true };
+        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Computah — Alt+A new, Ctrl+Alt+A continue", Visible = true };
         var menu = new WF.ContextMenuStrip();
         menu.Items.Add("New session  (Alt+A)", null, (_, _) => Trigger(HotkeyNew));
         menu.Items.Add("Continue latest session  (Ctrl+Alt+A)", null, (_, _) => Trigger(HotkeyContinue));
         menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add("Choose agent…", null, (_, _) => ShowPicker(firstRun: false));
         menu.Items.Add("Open screenshots folder", null, (_, _) => Shell(Paths.Screenshots, true));
         menu.Items.Add("Edit settings", null, (_, _) => { Settings.Load(); Shell(Paths.SettingsFile, false); });
         var startup = new WF.ToolStripMenuItem("Start with Windows") { Checked = IsStartupEnabled(), CheckOnClick = true };
@@ -78,9 +79,35 @@ sealed class AssistHost : IDisposable
         if (failed.Count > 0)
             tray.ShowBalloonTip(4000, "Computah", string.Join(" and ", failed) + " already used by another app.", WF.ToolTipIcon.Warning);
         else
-            tray.ShowBalloonTip(2500, "Computah is running", "Alt+A: new session Â· Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
+            tray.ShowBalloonTip(2500, "Computah is running", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
 
-        Settings.Load(); // creates settings.json on first run
+        // First run (or the chosen agent was uninstalled): ask which agent to use.
+        var s = Settings.Load(); // creates settings.json on first run
+        if (Agents.Resolve(s) == null)
+            app.Dispatcher.BeginInvoke(() => ShowPicker(firstRun: string.IsNullOrEmpty(s.Agent)));
+    }
+
+    PickerWindow? picker;
+
+    void ShowPicker(bool firstRun)
+    {
+        if (picker != null) { picker.Activate(); return; }
+        var current = Settings.Load().Agent;
+        picker = new PickerWindow(current, firstRun);
+        picker.Closed += (_, _) =>
+        {
+            var chosen = picker.Chosen;
+            picker = null;
+            if (chosen == null) return;
+            var s = Settings.Load();
+            s.Agent = chosen;
+            s.Save();
+            var name = Agents.All().First(a => a.Id == chosen).Name;
+            tray.Text = $"Computah ({name}) — Alt+A new, Ctrl+Alt+A continue";
+            tray.ShowBalloonTip(2500, $"Computah will use {name}", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
+        };
+        picker.Show();
+        picker.Activate();
     }
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -101,18 +128,23 @@ sealed class AssistHost : IDisposable
         var newest = open.Count > 0 ? open[^1] : null;
         if (newest != null && newest.CanSendAsIs(hotkey)) { newest.SendAsIs(); return; }
         if (busy) { if (hotkey == busyHotkey) sendQueued = true; return; } // fast double press during capture
+
+        var settings = Settings.Load();
+        var agent = Agents.Resolve(settings);
+        if (agent == null) { ShowPicker(firstRun: string.IsNullOrEmpty(settings.Agent)); return; }
+
         busy = true;
         busyHotkey = hotkey;
         sendQueued = false;
         try
         {
-            var settings = Settings.Load();
             var ctx = await ContextCapture.CaptureAsync(settings);
 
             BubbleWindow w;
             if (hotkey == HotkeyContinue && newest != null) w = newest;
-            else if (hotkey == HotkeyContinue && lastSessionId != null) w = Track(new BubbleWindow(settings, lastSessionId, lastHistory));
-            else w = Track(new BubbleWindow(settings));
+            else if (hotkey == HotkeyContinue && lastSessionId != null && lastAgentId == agent.Id)
+                w = Track(new BubbleWindow(settings, agent, lastSessionId, lastHistory));
+            else w = Track(new BubbleWindow(settings, agent));
 
             w.AttachContext(ctx, hotkey);
             if (!w.IsVisible) w.Show();
@@ -137,6 +169,7 @@ sealed class AssistHost : IDisposable
             if (w.HasConversation && w.SessionId != null)
             {
                 lastSessionId = w.SessionId;
+                lastAgentId = w.AgentId;
                 lastHistory = w.History.ToList();
             }
         };

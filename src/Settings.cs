@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text.Json.Serialization;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
@@ -37,10 +39,20 @@ static class Paths
 
 public sealed class Settings
 {
-    /// "sonnet", "haiku", "opus", a full model id, or "" for your Claude Code default.
-    public string Model { get; set; } = "sonnet";
+    /// Which console agent answers: "claude", "qwen". Empty = ask on startup.
+    public string Agent { get; set; } = "";
 
-    /// What Claude is asked when you press Ctrl+Alt+A.
+    /// Model per agent; "" means that agent's own default.
+    /// Claude Code: "sonnet", "haiku", "opus" or a full model id.
+    public Dictionary<string, string> Models { get; set; } = new() { ["claude"] = "sonnet", ["qwen"] = "" };
+
+    /// Old single-model setting (Claude only); moved into Models on load.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Model { get; set; }
+
+    public string ModelFor(string agent) => Models.TryGetValue(agent, out var m) ? m : "";
+
+    /// What the agent is asked when you press Enter without typing anything.
     public string Instruction { get; set; } =
         "Look at my screen around the mouse pointer, plus any selected text and clipboard content. " +
         "Work out what I most likely need help with and help directly: answer, explain, fix, translate or suggest the next step. Be concise.";
@@ -58,6 +70,7 @@ public sealed class Settings
     static readonly JsonSerializerOptions Opts = new()
     {
         WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // keep ' readable
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
@@ -69,12 +82,27 @@ public sealed class Settings
         try
         {
             if (File.Exists(Paths.SettingsFile))
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(Paths.SettingsFile), Opts) ?? new Settings();
+            {
+                var s = JsonSerializer.Deserialize<Settings>(File.ReadAllText(Paths.SettingsFile), Opts) ?? new Settings();
+                if (s.Model != null)
+                {
+                    s.Models["claude"] = s.Model;
+                    s.Model = null;
+                    s.Save();
+                }
+                return s;
+            }
         }
         catch (Exception ex) { Paths.Log("settings.json invalid, using defaults: " + ex.Message); return new Settings(); }
 
-        var s = new Settings();
-        try { File.WriteAllText(Paths.SettingsFile, JsonSerializer.Serialize(s, Opts)); } catch { }
-        return s;
+        var fresh = new Settings();
+        fresh.Save();
+        return fresh;
+    }
+
+    public void Save()
+    {
+        try { File.WriteAllText(Paths.SettingsFile, JsonSerializer.Serialize(this, Opts)); }
+        catch (Exception ex) { Paths.Log("settings save: " + ex.Message); }
     }
 }

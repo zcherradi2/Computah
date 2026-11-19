@@ -100,7 +100,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource Accent}" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="Claude" Foreground="{StaticResource Fg}" FontWeight="SemiBold"
+                    <TextBlock Grid.Column="1" x:Name="AgentLabel" Text="Claude" Foreground="{StaticResource Fg}" FontWeight="SemiBold"
                                Margin="9,0,0,1" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" x:Name="StatusText" Foreground="{StaticResource Muted}" FontSize="12"
                                Margin="10,1,6,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
