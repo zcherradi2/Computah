@@ -27,8 +27,8 @@ sealed class AgentSession : IDisposable
     public AgentSession(Settings s, AgentInfo agent, string? resumeId = null)
     {
         SessionId = resumeId;
-        if (!agent.SupportsSystemPromptFlag && resumeId == null && !string.IsNullOrWhiteSpace(s.SystemPrompt))
-            instructions = s.SystemPrompt;
+        if (!agent.SupportsSystemPromptFlag && resumeId == null)
+            instructions = Prompts.Build(s);
 
         var psi = new ProcessStartInfo(agent.Path ?? throw new FileNotFoundException($"{agent.Name} is not installed"))
         {

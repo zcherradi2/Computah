@@ -49,7 +49,7 @@ static class Agents
                 if (resume != null) { a.Add("--resume"); a.Add(resume); }
                 var model = s.ModelFor("claude");
                 if (!string.IsNullOrWhiteSpace(model)) { a.Add("--model"); a.Add(model); }
-                if (!string.IsNullOrWhiteSpace(s.SystemPrompt)) { a.Add("--append-system-prompt"); a.Add(s.SystemPrompt); }
+                a.Add("--append-system-prompt"); a.Add(Prompts.Build(s));
                 if (!string.IsNullOrWhiteSpace(s.AllowedTools)) { a.Add("--allowedTools"); a.Add(s.AllowedTools); }
                 if (!s.LoadMcpServers) a.Add("--strict-mcp-config");
                 // Never let the agent open the saved screenshots on its own.

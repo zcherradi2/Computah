@@ -23,7 +23,7 @@ public sealed class CapturedContext
 
     public string ScreenshotPath = "";
     public string FullJpeg = ""; public int FullW, FullH, FullCursorX, FullCursorY;
-    public string? CropJpeg; public int CropW, CropH, CropCursorX, CropCursorY;
+    public string? CropJpeg; public int CropW, CropH, CropCursorX, CropCursorY, CropX, CropY; // CropX/Y: origin within the monitor
 
     public string? SelectedText, ClipboardText, ClipboardImageJpeg;
     public List<string> ClipboardFiles = new();
@@ -139,6 +139,7 @@ static class ContextCapture
                     int cx = Math.Clamp(mx - cw / 2, 0, bmp.Width - cw), cy = Math.Clamp(my - ch / 2, 0, bmp.Height - ch);
                     c.CropJpeg = Img.CropJpeg(bmp, new Rectangle(cx, cy, cw, ch), g => Img.Marker(g, mx - cx, my - cy, 16));
                     c.CropW = cw; c.CropH = ch; c.CropCursorX = mx - cx; c.CropCursorY = my - cy;
+                    c.CropX = cx; c.CropY = cy;
                 }
                 encoded.TrySetResult();
                 bmp.Save(c.ScreenshotPath, ImageFormat.Png);

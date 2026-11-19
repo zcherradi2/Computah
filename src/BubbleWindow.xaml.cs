@@ -51,6 +51,12 @@ public partial class BubbleWindow : Window
     readonly StringBuilder pending = new();
     readonly object gate = new();
 
+    // On-screen hints: tags are stripped from the stream and drawn over the screenshot's monitor.
+    readonly HintFilter hintFilter = new();
+    ScreenMap? lastScreen;     // the latest screenshot sent in this conversation
+    HintOverlay? overlay;
+    int hintTurn, overlayTurn;
+
     public List<Turn> History { get; } = new();
     public string? SessionId => session?.SessionId ?? resumeId;
     public bool HasConversation => History.Count > 0;
@@ -122,13 +128,24 @@ public partial class BubbleWindow : Window
     void StartSession()
     {
         session = new AgentSession(settings, agent, resumeId);
-        session.Text += t => { lock (gate) pending.Append(t); };
-        session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
-        session.TurnDone += (err, msg) => Dispatcher.BeginInvoke(() =>
+        session.Text += t =>
         {
-            doneInfo = (err, msg);
-            turnDonePending = true;
-        });
+            var hints = new List<HintTag>();
+            var shown = hintFilter.Feed(t, hints);
+            lock (gate) pending.Append(shown);
+            if (hints.Count > 0) Dispatcher.BeginInvoke(() => ShowHints(hints));
+        };
+        session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
+        session.TurnDone += (err, msg) =>
+        {
+            var rest = hintFilter.Flush();
+            if (rest.Length > 0) lock (gate) pending.Append(rest);
+            Dispatcher.BeginInvoke(() =>
+            {
+                doneInfo = (err, msg);
+                turnDonePending = true;
+            });
+        };
     }
 
     // ---------- hotkey entry points ----------
@@ -293,6 +310,7 @@ public partial class BubbleWindow : Window
         if (ctx != null)
         {
             ctx.IncludeScreen = attachments.Any(a => a.Kind == "screen");
+            if (ctx.IncludeScreen) lastScreen = new ScreenMap(ctx);
             ctx.IncludeSelection = attachments.Any(a => a.Kind == "selection");
             ctx.IncludeClipboard = attachments.Any(a => a.Kind == "clipboard");
             blocks.AddRange(ctx.ImageBlocks());
@@ -318,6 +336,8 @@ public partial class BubbleWindow : Window
 
         SetStreaming(true);
         StatusText.Text = "Thinking…";
+        hintFilter.Reset();
+        hintTurn++;
         try { session!.Send(blocks); }
         catch (Exception ex)
         {
@@ -389,12 +409,35 @@ public partial class BubbleWindow : Window
         }
         else if (current != null)
         {
-            current.Text = current.Text.TrimEnd();
+            // hint tags often sat on their own line: drop the blank lines they leave behind
+            current.Text = System.Text.RegularExpressions.Regex.Replace(current.Text, @"[ \t]*\n[ \t]*\n(?:[ \t]*\n)+", "\n\n").Trim();
             History.Add(new Turn(false, current.Text, null));
         }
         if (IsActive) Input.Focus();
         Changed?.Invoke();
         if (sendRequested && contextReady) SendAsIs();
+    }
+
+    // ---------- hints ----------
+
+    /// Draw the agent's hints on the monitor of the latest screenshot. A new reply replaces older hints.
+    void ShowHints(List<HintTag> hints)
+    {
+        if (lastScreen == null || closed) return; // no screenshot in this conversation: nothing to point at
+        if (overlay != null && (overlayTurn != hintTurn || !overlay.IsVisible || overlay.MonitorRect != lastScreen.Monitor))
+        {
+            overlay.Close();
+            overlay = null;
+        }
+        if (overlay == null)
+        {
+            overlay = new HintOverlay(lastScreen.Monitor);
+            var o = overlay;
+            o.Closed += (_, _) => { if (overlay == o) overlay = null; };
+            overlayTurn = hintTurn;
+            o.Show();
+        }
+        foreach (var h in hints.Take(5)) overlay.Add(h, lastScreen);
     }
 
     // ---------- conversation UI ----------

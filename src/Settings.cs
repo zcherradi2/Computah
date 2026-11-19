@@ -57,10 +57,8 @@ public sealed class Settings
         "Look at my screen around the mouse pointer, plus any selected text and clipboard content. " +
         "Work out what I most likely need help with and help directly: answer, explain, fix, translate or suggest the next step. Be concise.";
 
-    public string SystemPrompt { get; set; } =
-        "You are a fast desktop assistant shown in a small floating chat bubble next to the user's mouse. " +
-        "Answer briefly and directly. Use plain text: short paragraphs and simple '-' bullets. " +
-        "No headings, no tables, no bold/italics markup. Code may go in plain indented lines.";
+    /// Extra instructions added after Computah's built-in ones (see Prompts.cs).
+    public string SystemPrompt { get; set; } = "";
 
     public bool ShowDock { get; set; } = true;            // floating Computah button with the sessions list
 
