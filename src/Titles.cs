@@ -11,15 +11,33 @@ static class Titles
 {
     public static async Task<string?> GenerateAsync(AgentInfo agent, string userText, string answer)
     {
-        if (agent.Path == null) return null;
+        if (agent.Path == null && !agent.BuiltIn) return null;
         var prompt =
             "Write a short title (3 to 6 words) for the conversation below, in the language the user wrote in. " +
             "It should say what the user wanted help with. Reply with only the title: no quotes, no trailing period.\n\n" +
             $"User: {Clip(userText, 800)}\n\nAssistant: {Clip(answer, 1500)}";
 
+        if (agent.BuiltIn)
+        {
+            // one small call with the provider's fast model
+            try
+            {
+                var client = BuiltinProviders.Client(agent.Provider);
+                var msg = await client.Messages.Create(new Anthropic.Models.Messages.MessageCreateParams
+                {
+                    Model = agent.Provider.TitleModel,
+                    MaxTokens = 2000,
+                    Messages = [new Anthropic.Models.Messages.UserMessageParam { Content = prompt }],
+                });
+                var text = string.Concat(msg.Content.Select(b => b.Value).OfType<Anthropic.Models.Messages.TextBlock>().Select(t => t.Text));
+                return Clean(text);
+            }
+            catch (Exception ex) { Paths.Log("title (api): " + ex.Message); return null; }
+        }
+
         try
         {
-            var psi = new ProcessStartInfo(agent.Path)
+            var psi = new ProcessStartInfo(agent.Path!)
             {
                 UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Paths.Workspace,
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,

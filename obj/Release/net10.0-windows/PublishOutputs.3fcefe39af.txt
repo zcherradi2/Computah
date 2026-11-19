@@ -3,4 +3,6 @@ C:\Users\pc\Desktop\assist\app\Computah.dll
 C:\Users\pc\Desktop\assist\app\Computah.deps.json
 C:\Users\pc\Desktop\assist\app\Computah.runtimeconfig.json
 C:\Users\pc\Desktop\assist\app\Computah.pdb
+C:\Users\pc\Desktop\assist\app\Anthropic.dll
 C:\Users\pc\Desktop\assist\app\ICSharpCode.AvalonEdit.dll
+C:\Users\pc\Desktop\assist\app\Microsoft.Extensions.AI.Abstractions.dll

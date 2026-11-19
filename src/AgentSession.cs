@@ -9,9 +9,25 @@ using System.Threading.Tasks;
 
 namespace Assist;
 
+/// What a chat bubble needs from an agent, whichever backend runs it: an external console (AgentSession)
+/// or Computah's own agent loop (BuiltinSession). Events fire on background threads.
+interface IAgentSession : IDisposable
+{
+    string? SessionId { get; }
+    event Action<string>? Text;
+    event Action<string>? Status;
+    event Action<bool, string?>? TurnDone;
+    event Action<string, string>? ToolUsed;
+    event Action<FileChange>? FileChanged;
+    Func<string>? LogName { get; set; }
+    /// Asks the user before running something not covered by the permissions (null = refuse). Only some backends use it.
+    Func<string, string, Task<bool>>? Approve { get; set; }
+    void Send(List<object> content);
+}
+
 /// One long-lived agent process (Claude Code, Qwen Code, …) in stream-json mode = one conversation.
 /// Follow-up messages are written to the same process, so context is kept and replies start fast.
-sealed class AgentSession : IDisposable
+sealed class AgentSession : IAgentSession
 {
     readonly Process proc;
     readonly StringBuilder stderr = new();
@@ -88,7 +104,8 @@ sealed class AgentSession : IDisposable
     }
 
     /// Which conversation this is, for the command log ("title (id)").
-    public Func<string>? LogName;
+    public Func<string>? LogName { get; set; }
+    public Func<string, string, Task<bool>>? Approve { get; set; } // unused: the console handles its own permissions
     readonly string agentName = "", permissions = "";
     string? reportedMode; // from the agent's own startup message
     string Permissions => reportedMode == null ? permissions : permissions + "\n" + reportedMode;

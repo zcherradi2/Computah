@@ -25,3 +25,5 @@ C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\SessionsPanel.g.cs
 C:\Users\pc\Desktop\assist\bin\Release\net10.0-windows\ICSharpCode.AvalonEdit.dll
 C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\Computah.csproj.AssemblyReference.cache
 C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\Computah.csproj.Up2Date
+C:\Users\pc\Desktop\assist\bin\Release\net10.0-windows\Anthropic.dll
+C:\Users\pc\Desktop\assist\bin\Release\net10.0-windows\Microsoft.Extensions.AI.Abstractions.dll

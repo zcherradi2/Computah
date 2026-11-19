@@ -26,8 +26,17 @@ public sealed class AgentInfo
     /// One-shot, text-only, unsaved run used to name a session. The prompt is sent on stdin.
     public required Func<List<string>> TitleArgs { get; init; }
 
+    /// Computah's own agent loop (Claude API with the user's key): nothing to install.
+    public bool BuiltIn { get; init; }
+
     public string? Path { get; set; }
-    public bool Installed => Path != null;
+    public bool Installed => BuiltIn || Path != null;
+
+    /// Built-in agents: which API provider they use (Claude API, DeepSeek...).
+    public string? ProviderId { get; init; }
+    public BuiltinProvider Provider => BuiltinProviders.ById(ProviderId);
+    /// Built-in agent: whether a key for its provider is set up.
+    public bool HasKey => BuiltIn && BuiltinProviders.HasKey(Provider);
 }
 
 static class Agents
@@ -39,6 +48,24 @@ static class Agents
     /// Fresh, undetected definitions of every supported agent.
     public static List<AgentInfo> All() => new()
     {
+        new AgentInfo
+        {
+            Id = "computah", Name = "Computah (built-in)", Vendor = "Claude API · your Anthropic API key",
+            Executables = Array.Empty<string>(), KnownPaths = Array.Empty<string>(),
+            InstallHint = "Needs an Anthropic API key: set ANTHROPIC_API_KEY (console.anthropic.com)",
+            BuiltIn = true, ProviderId = "anthropic", SupportsSystemPromptFlag = true, SupportsSharedPaths = true,
+            Args = (_, _, _) => new List<string>(),
+            TitleArgs = () => new List<string>(),
+        },
+        new AgentInfo
+        {
+            Id = "computah-deepseek", Name = "Computah (built-in) · DeepSeek", Vendor = "DeepSeek API · your DeepSeek API key",
+            Executables = Array.Empty<string>(), KnownPaths = Array.Empty<string>(),
+            InstallHint = "Needs a DeepSeek API key: set DEEPSEEK_API_KEY (platform.deepseek.com)",
+            BuiltIn = true, ProviderId = "deepseek", SupportsSystemPromptFlag = true, SupportsSharedPaths = true,
+            Args = (_, _, _) => new List<string>(),
+            TitleArgs = () => new List<string>(),
+        },
         new AgentInfo
         {
             Id = "claude", Name = "Claude Code", Vendor = "Anthropic",
@@ -107,6 +134,7 @@ static class Agents
     {
         var a = All().FirstOrDefault(x => x.Id == s.Agent);
         if (a == null) return null;
+        if (a.BuiltIn && !a.HasKey) return null; // not usable yet: the picker asks for a key
         a.Path = Locate(a);
         return a.Installed ? a : null;
     }
@@ -124,6 +152,7 @@ static class Agents
 
     static string? Locate(AgentInfo a)
     {
+        if (a.BuiltIn) return null;
         var dirs = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(System.IO.Path.PathSeparator)
             .Where(d => d.Length > 0).Select(d => d.Trim('"'));
         foreach (var dir in dirs)
@@ -133,6 +162,84 @@ static class Agents
             }
         return a.KnownPaths.FirstOrDefault(File.Exists);
     }
+
+    /// Makes sure an agent can actually answer before it is chosen. Null = works; otherwise what's wrong and how to fix it.
+    /// Built-in: the API key is checked against Anthropic (listing models, no tokens used).
+    /// Consoles: a tiny one-shot prompt has to come back (catches "not logged in", broken installs...).
+    public static async Task<string?> CheckAsync(AgentInfo a, string? apiKey = null)
+    {
+        if (a.BuiltIn)
+        {
+            try
+            {
+                var prov = a.Provider;
+                var client = BuiltinProviders.Client(prov, string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim());
+                // Anthropic: list models (no tokens used). Others: a one-token message (models listing may not exist there).
+                Task work = prov.BaseUrl == null
+                    ? client.Models.List()
+                    : client.Messages.Create(new Anthropic.Models.Messages.MessageCreateParams
+                      {
+                          Model = prov.DefaultModel, MaxTokens = 5,
+                          Messages = [new Anthropic.Models.Messages.UserMessageParam { Content = "Say OK" }],
+                      });
+                if (await Task.WhenAny(work, Task.Delay(30000)) != work) return $"{prov.Name} didn't answer in time. Check your internet connection.";
+                await work;
+                return null;
+            }
+            catch (Exception ex)
+            {
+                var m = ex.Message;
+                if (m.Contains("401") || m.Contains("authentication", StringComparison.OrdinalIgnoreCase) || m.Contains("api-key") || m.Contains("api key", StringComparison.OrdinalIgnoreCase))
+                    return string.IsNullOrWhiteSpace(apiKey)
+                        ? $"No working {a.Provider.Name} API key. Paste one below (create it at {a.Provider.KeySite})."
+                        : $"{a.Provider.Name} rejected that API key. Check it was copied completely.";
+                if (m.Contains("No ") && m.Contains("API key")) return $"No {a.Provider.Name} API key yet. Paste one below (create it at {a.Provider.KeySite}).";
+                return $"Couldn't reach {a.Provider.Name}: " + Short(m);
+            }
+        }
+
+        if (a.Path == null) return $"{a.Name} is not installed. To install: {a.InstallHint}";
+        try
+        {
+            var psi = new ProcessStartInfo(a.Path)
+            {
+                UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Paths.Workspace,
+                RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = new UTF8Encoding(false), StandardErrorEncoding = new UTF8Encoding(false),
+            };
+            foreach (var x in a.TitleArgs()) psi.ArgumentList.Add(x);
+            psi.Environment.Remove("CLAUDECODE");
+            psi.Environment.Remove("CLAUDE_CODE_ENTRYPOINT");
+            using var p = Process.Start(psi)!;
+            await p.StandardInput.WriteAsync("Reply with just the word OK.");
+            p.StandardInput.Close();
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            var errTask = p.StandardError.ReadToEndAsync();
+            await Task.WhenAny(p.WaitForExitAsync(), Task.Delay(90000));
+            if (!p.HasExited)
+            {
+                try { p.Kill(true); } catch { }
+                return $"{a.Name} didn't answer within 90 seconds. Run it once in a terminal to check it works.";
+            }
+            var output = (await outTask).Trim();
+            var error = (await errTask).Trim();
+            if (p.ExitCode == 0 && output.Length > 0) return null;
+            var why = (error.Length > 0 ? error : output);
+            var login = why.Contains("login", StringComparison.OrdinalIgnoreCase) || why.Contains("auth", StringComparison.OrdinalIgnoreCase) || why.Contains("api key", StringComparison.OrdinalIgnoreCase);
+            return $"{a.Name} isn't working{(login ? " (not signed in?)" : "")}: {Short(why.Length > 0 ? why : $"exit code {p.ExitCode}")}" +
+                   $"\nOpen a terminal, run \"{System.IO.Path.GetFileNameWithoutExtension(a.Path)}\" and sign in, then try again.";
+        }
+        catch (Exception ex) { return $"Couldn't start {a.Name}: {Short(ex.Message)}"; }
+    }
+
+    static string Short(string s)
+    {
+        s = s.ReplaceLineEndings(" ").Trim();
+        return s.Length > 220 ? s[..220] + "…" : s;
+    }
+
+    /// Saves an API key for the built-in agent: for this user (future runs) and for this running Computah.
+    public static void SaveApiKey(AgentInfo a, string key) => BuiltinProviders.SaveKey(a.Provider, key);
 
     public static async Task<string?> VersionAsync(string path)
     {

@@ -44,7 +44,7 @@ public partial class BubbleWindow : Window
     int anchorX, anchorY;
     bool anchorBelow;
 
-    AgentSession? session;
+    IAgentSession? session;
     bool streaming, userMoved, turnDonePending, closed;
     (bool err, string? msg) doneInfo;
     TextBox? current;
@@ -170,7 +170,11 @@ public partial class BubbleWindow : Window
     void StartSession(string? resume = null, bool refreshInstructions = false)
     {
         var paths = Access().ToList();
-        session = new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions, paths) { LogName = () => LogName?.Invoke() ?? "session" };
+        session = agent.BuiltIn
+            ? new BuiltinSession(settings, agent, resume ?? resumeId, paths)
+            : new AgentSession(settings, agent, resume ?? resumeId, refreshInstructions, paths);
+        session.LogName = () => LogName?.Invoke() ?? "session";
+        session.Approve = (title, detail) => Dispatcher.Invoke(() => AskApproval(title, detail));
         startedPaths = string.Join("|", paths);
         session.Text += t =>
         {
@@ -700,6 +704,22 @@ public partial class BubbleWindow : Window
         Messages.Children.Add(card);
         Scroller.ScrollToEnd();
         ShowBubble(activate: true);
+    }
+
+    /// The built-in agent wants to run something its permissions don't cover (a command that changes things): ask.
+    Task<bool> AskApproval(string title, string detail)
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        var card = Card(title, detail.Length > 600 ? detail[..600] + "…" : detail);
+        ((TextBlock)((StackPanel)card.Child).Children[1]).FontFamily = new FontFamily("Cascadia Mono, Consolas");
+        var buttons = (StackPanel)((StackPanel)card.Child).Children[2];
+        buttons.Children.Add(CardButton("Run", true, () => { Resolve(card, "Allowed."); tcs.TrySetResult(true); }));
+        buttons.Children.Add(CardButton("Don't run", false, () => { Resolve(card, "Not allowed."); tcs.TrySetResult(false); }));
+        Messages.Children.Add(card);
+        Scroller.ScrollToEnd();
+        ShowBubble(activate: true);
+        Closed += (_, _) => tcs.TrySetResult(false);
+        return tcs.Task;
     }
 
     void AddApprovalCard(List<HintTag> acts)

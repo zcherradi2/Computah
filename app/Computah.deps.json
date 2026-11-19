@@ -8,10 +8,22 @@
     ".NETCoreApp,Version=v10.0": {
       "Computah/1.0.0": {
         "dependencies": {
+          "Anthropic": "13.10.0",
           "AvalonEdit": "6.3.1.120"
         },
         "runtime": {
           "Computah.dll": {}
+        }
+      },
+      "Anthropic/13.10.0": {
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.5.1"
+        },
+        "runtime": {
+          "lib/net9.0/Anthropic.dll": {
+            "assemblyVersion": "13.10.0.0",
+            "fileVersion": "13.10.0.0"
+          }
         }
       },
       "AvalonEdit/6.3.1.120": {
@@ -19,6 +31,14 @@
           "lib/net8.0-windows7.0/ICSharpCode.AvalonEdit.dll": {
             "assemblyVersion": "6.3.1.120",
             "fileVersion": "6.3.1.120"
+          }
+        }
+      },
+      "Microsoft.Extensions.AI.Abstractions/10.5.1": {
+        "runtime": {
+          "lib/net10.0/Microsoft.Extensions.AI.Abstractions.dll": {
+            "assemblyVersion": "10.5.0.0",
+            "fileVersion": "10.500.126.25103"
           }
         }
       }
@@ -30,12 +50,26 @@
       "serviceable": false,
       "sha512": ""
     },
+    "Anthropic/13.10.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-p9kXFfvKk2quABpikYRstGp522CAMp9nQkllnS5dV07T6lmY6OBX2pSW6QTrI844vovya0jYC84cSCQuxGVnDw==",
+      "path": "anthropic/13.10.0",
+      "hashPath": "anthropic.13.10.0.nupkg.sha512"
+    },
     "AvalonEdit/6.3.1.120": {
       "type": "package",
       "serviceable": true,
       "sha512": "sha512-6ASBKPzAg64BLDlFOJo4Ypr1sA/6hB5+TfHLJaZYUSTE0jgxvKlVqKeo/ISTG9qEMxu604qUu6BGugmJkfdrNw==",
       "path": "avalonedit/6.3.1.120",
       "hashPath": "avalonedit.6.3.1.120.nupkg.sha512"
+    },
+    "Microsoft.Extensions.AI.Abstractions/10.5.1": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-nB0l3IlsVbNeUxsE7nZNb9GY8rP1OSeqpj0pseORPejt474HNKEauTWTLdSJPkSvPlRMxowZNMo6nyp7APAiSg==",
+      "path": "microsoft.extensions.ai.abstractions/10.5.1",
+      "hashPath": "microsoft.extensions.ai.abstractions.10.5.1.nupkg.sha512"
     }
   }
 }

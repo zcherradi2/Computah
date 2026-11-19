@@ -24,6 +24,8 @@ public partial class PickerWindow : Window
     readonly List<AgentInfo> agents;
     readonly Dictionary<string, (Border card, Ellipse dot)> cards = new();
     string? selected;
+    readonly Dictionary<string, PasswordBox> keyBoxes = new(); // built-in agents: paste an API key when none is set up
+    bool checking;
 
     public string? Chosen { get; private set; }
 
@@ -40,7 +42,8 @@ public partial class PickerWindow : Window
         agents = Agents.Detect();
         foreach (var a in agents) List.Children.Add(MakeCard(a));
 
-        var initial = agents.FirstOrDefault(a => a.Installed && a.Id == current) ?? agents.FirstOrDefault(a => a.Installed);
+        var initial = agents.FirstOrDefault(a => a.Installed && a.Id == current)
+                   ?? agents.FirstOrDefault(a => a.Installed && !a.BuiltIn) ?? agents.FirstOrDefault(a => a.Installed);
         if (initial != null) Select(initial.Id);
         else
         {
@@ -50,7 +53,7 @@ public partial class PickerWindow : Window
 
         Loaded += async (_, _) =>
         {
-            foreach (var a in agents.Where(a => a.Installed))
+            foreach (var a in agents.Where(a => a.Installed && !a.BuiltIn))
             {
                 var v = await Agents.VersionAsync(a.Path!);
                 if (v != null && cards.TryGetValue(a.Id, out var c) && c.card.Tag is TextBlock meta)
@@ -65,12 +68,34 @@ public partial class PickerWindow : Window
         var dot = new Ellipse { Width = 14, Height = 14, Stroke = Muted, StrokeThickness = 1.5, VerticalAlignment = VerticalAlignment.Center };
 
         var name = new TextBlock { Text = a.Name, Foreground = Fg, FontSize = 15, FontWeight = FontWeights.SemiBold };
-        var meta = new TextBlock { Text = a.Installed ? a.Vendor + " · checking version…" : a.Vendor, Foreground = Muted, FontSize = 12, Margin = new Thickness(0, 2, 0, 0) };
+        var meta = new TextBlock { Text = a.Installed && !a.BuiltIn ? a.Vendor + " · checking version…" : a.Vendor, Foreground = Muted, FontSize = 12, Margin = new Thickness(0, 2, 0, 0) };
         var body = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
         body.Children.Add(name);
         body.Children.Add(meta);
 
-        if (a.Installed)
+        if (a.BuiltIn)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = a.HasKey ? $"No console needed: Computah runs the agent itself. {a.Provider.Name} API key found."
+                                : $"No console needed: Computah runs the agent itself, with your {a.Provider.Name} API key (billed per use).",
+                Foreground = Muted, FontSize = 11.5, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap,
+            });
+            if (!a.HasKey)
+            {
+                var keyBox = new PasswordBox
+                {
+                    Foreground = Fg, CaretBrush = Fg, Background = Frozen(Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF)),
+                    BorderBrush = Border0, BorderThickness = new Thickness(1), Padding = new Thickness(6, 4, 6, 4),
+                    Margin = new Thickness(0, 6, 0, 0), FontFamily = Mono, FontSize = 12, ToolTip = "Paste your API key",
+                };
+                keyBox.GotFocus += (_, _) => Select(a.Id);
+                keyBoxes[a.Id] = keyBox;
+                body.Children.Add(keyBox);
+                body.Children.Add(new TextBlock { Text = $"Paste an API key from {a.Provider.KeySite}. It is checked, then saved for your Windows user.", Foreground = Muted, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap });
+            }
+        }
+        else if (a.Installed)
             body.Children.Add(new TextBlock { Text = a.Path, Foreground = Muted, FontSize = 11, FontFamily = Mono, Margin = new Thickness(0, 4, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
         else
         {
@@ -84,7 +109,7 @@ public partial class PickerWindow : Window
 
         var status = new TextBlock
         {
-            Text = a.Installed ? "Installed" : "Not found",
+            Text = a.BuiltIn ? "Built in" : a.Installed ? "Installed" : "Not found",
             Foreground = a.Installed ? Accent : Muted, FontSize = 11.5, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(8, 2, 0, 0),
         };
 
@@ -127,11 +152,43 @@ public partial class PickerWindow : Window
         UseBtn.IsEnabled = true;
     }
 
-    void Use_Click(object sender, RoutedEventArgs e)
+    /// Only accept an agent that actually answers: check it first, keep the window open with the reason if not.
+    async void Use_Click(object sender, RoutedEventArgs e)
     {
-        if (selected == null) return;
+        if (selected == null || checking) return;
+        var a = agents.First(x => x.Id == selected);
+        keyBoxes.TryGetValue(a.Id, out var keyBox);
+        var key = keyBox?.Password.Trim();
+        if (keyBox != null && string.IsNullOrEmpty(key))
+        {
+            ShowHint($"Paste your {a.Provider.Name} API key in the box first.", error: true);
+            keyBox.Focus();
+            return;
+        }
+
+        checking = true;
+        UseBtn.IsEnabled = false;
+        var label = UseBtn.Content;
+        UseBtn.Content = "Checking…";
+        ShowHint($"Checking that {a.Name} works…", error: false);
+        string? problem;
+        try { problem = await Agents.CheckAsync(a, key); }
+        catch (Exception ex) { problem = ex.Message; }
+        checking = false;
+        UseBtn.Content = label;
+        UseBtn.IsEnabled = true;
+
+        if (problem != null) { ShowHint(problem, error: true); return; }
+        if (!string.IsNullOrEmpty(key)) Agents.SaveApiKey(a, key);
         Chosen = selected;
         Close();
+    }
+
+    void ShowHint(string text, bool error)
+    {
+        Hint.Text = text;
+        Hint.Foreground = error ? Frozen(Color.FromRgb(0xFF, 0x8A, 0x8A)) : Muted;
+        Hint.TextWrapping = TextWrapping.Wrap;
     }
 
     void Cancel_Click(object sender, RoutedEventArgs e) => Close();

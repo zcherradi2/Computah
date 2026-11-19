@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Assist;
 
 /// What every agent is told about Computah, its job, and the on-screen hints it can use.
@@ -141,6 +143,21 @@ static class Prompts
         """;
 
     const string ControlAsk = "\nThe user approves each batch of actions before it runs, so keep batches small and clear.";
+
+    /// For Computah's own agent loop: the tools it has and where it may work.
+    public static string BuiltinTools(string shellDir, IEnumerable<string> readable, IEnumerable<string> editable) => $"""
+        YOUR TOOLS (Computah's built-in agent, on Windows)
+        - str_replace_based_edit_tool: view files and folders, create files, replace exact text, insert lines.
+          View a file before editing it, and copy old_str exactly (it must match once).
+        - glob: find files by name pattern. grep: search file contents with a regular expression.
+        - powershell: Windows PowerShell 5.1 (not bash). Read-only commands run directly; commands that change
+          anything ask the user first, who may refuse: keep them few and explain why in your reply.
+        Paths are absolute Windows paths. The shell starts in {shellDir}.
+        You can read: {string.Join("; ", readable)}
+        You can edit: {string.Join("; ", editable)}
+        For anything else, ask with <request-access .../> as described above. Your on-screen abilities (hints, file
+        cards, drawings, mouse and keyboard actions) are the tags described above, written in your reply text.
+        """;
 
     /// The mouse/keyboard part of the instructions for the current permission.
     public static string ControlSection(Settings s) =>
