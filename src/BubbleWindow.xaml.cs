@@ -177,6 +177,7 @@ public partial class BubbleWindow : Window
         };
         session.Status += s => Dispatcher.BeginInvoke(() => { if (streaming) StatusText.Text = s; });
         session.ToolUsed += (name, detail) => Dispatcher.BeginInvoke(() => ToolUsed?.Invoke(name, detail));
+        session.FileChanged += c => Dispatcher.BeginInvoke(() => ShowChange(c));
         session.TurnDone += (err, msg) =>
         {
             var rest = hintFilter.Flush();
@@ -398,6 +399,7 @@ public partial class BubbleWindow : Window
         Attachments.Children.Clear();
         Attachments.Visibility = Visibility.Collapsed;
         if (pendingReport != null) { body = pendingReport + "\n\n" + body; pendingReport = null; }
+        if (UndoNews() is { } undo) body = undo + "\n\n" + body;
         if (PeekWindow.DescribeOpen(this) is { } cards) body = cards + "\n\n" + body;
         blocks.Add(new { type = "text", text = body });
         Dispatch(blocks, text, attachLine);
@@ -574,8 +576,17 @@ public partial class BubbleWindow : Window
 
     // ---------- file access ----------
 
-    /// The agent asked to read files/folders it can't reach: ask the user, then restart it with access and continue.
+    /// The agent asked to read (or edit) files/folders it can't reach: ask the user, then restart it with access and continue.
     void AddAccessCard(List<HintTag> requests)
+    {
+        bool IsEdit(HintTag r) => (r.Get("mode") ?? r.Get("access") ?? "").Trim().ToLowerInvariant() is "edit" or "write" or "change";
+        var edits = requests.Where(IsEdit).ToList();
+        var reads = requests.Except(edits).ToList();
+        if (reads.Count > 0) AccessCard(reads, edit: false);
+        if (edits.Count > 0) AccessCard(edits, edit: true);
+    }
+
+    void AccessCard(List<HintTag> requests, bool edit)
     {
         var paths = new List<string>();
         var missing = new List<string>();
@@ -584,37 +595,47 @@ public partial class BubbleWindow : Window
             var raw = r.Get("path");
             if (string.IsNullOrWhiteSpace(raw)) continue;
             var p = Environment.ExpandEnvironmentVariables(raw.Trim().Trim('"')).Replace('/', '\\');
-            try { p = System.IO.Path.GetFullPath(p); } catch { missing.Add(raw); continue; }
+            try { p = System.IO.Path.GetFullPath(p).TrimEnd('\\'); } catch { missing.Add(raw); continue; }
+            if (p.Length == 2) p += "\\"; // a drive root
             if (!System.IO.Directory.Exists(p) && !System.IO.File.Exists(p)) { missing.Add(raw); continue; }
-            if (sharedPaths.Contains(p, StringComparer.OrdinalIgnoreCase)) continue; // already has it
+            if (edit ? SharedAccess.CanEdit(sharedPaths, p) : SharedAccess.CanRead(sharedPaths, p)) continue; // already has it
             if (!paths.Contains(p, StringComparer.OrdinalIgnoreCase)) paths.Add(p);
         }
         if (paths.Count == 0)
         {
-            if (missing.Count > 0) pendingReport = $"[Computah] These paths don't exist, so no access was asked for: {string.Join(", ", missing)}";
+            if (missing.Count > 0) pendingReport = $"[Computah] These paths don't exist, so no access was asked for: {string.Join(", ", missing)}" +
+                                                   (edit ? ". To create new files, ask for edit access to the folder they go in." : "");
             return;
         }
 
         var reason = requests.Select(r => r.Get("reason")).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         var body = string.Join("\n", paths.Select(p => (System.IO.Directory.Exists(p) ? "📁 " : "📄 ") + p))
                  + (reason != null ? $"\n\nWhy: {reason}" : "")
-                 + "\n\nIt can read and search them for this conversation only. It can't change or delete anything.";
-        var card = Card($"Let {agent.Name} read {(paths.Count == 1 ? "this" : "these")}?", body);
+                 + (edit ? "\n\nIt can then create and change files there, for this conversation only. Every change pops up on screen with an Undo button. It still can't run commands that change things."
+                         : "\n\nIt can read and search them for this conversation only. It can't change or delete anything.");
+        var card = Card(edit ? $"Let {agent.Name} edit files in {(paths.Count == 1 ? "this" : "these")}?"
+                             : $"Let {agent.Name} read {(paths.Count == 1 ? "this" : "these")}?", body);
         var buttons = (StackPanel)((StackPanel)card.Child).Children[2];
-        buttons.Children.Add(CardButton("Allow", true, () =>
+        buttons.Children.Add(CardButton(edit ? "Allow edits" : "Allow", true, () =>
         {
-            foreach (var p in paths) if (!sharedPaths.Contains(p, StringComparer.OrdinalIgnoreCase)) sharedPaths.Add(p);
+            foreach (var p in paths)
+            {
+                var entry = edit ? SharedAccess.EditPrefix + p : p;
+                if (!sharedPaths.Contains(entry, StringComparer.OrdinalIgnoreCase)) sharedPaths.Add(entry);
+            }
             Changed?.Invoke(); // saved with the session
-            Resolve(card, "Access allowed.");
-            var note = "[Computah] The user gave you read access to:\n" + string.Join("\n", paths.Select(p => "- " + p)) +
-                       "\nUse your file tools (read, list, search) on these paths now and continue with what they asked.";
-            Dispatch(new List<object> { new { type = "text", text = note } }, "", "Computah: read access allowed");
+            Resolve(card, edit ? "Edits allowed." : "Access allowed.");
+            var note = $"[Computah] The user gave you {(edit ? "edit" : "read")} access to:\n" + string.Join("\n", paths.Select(p => "- " + p)) +
+                       (edit ? "\nYou can now change files there with your file editing tools. Continue with what they asked."
+                             : "\nUse your file tools (read, list, search) on these paths now and continue with what they asked.");
+            Dispatch(new List<object> { new { type = "text", text = note } }, "", edit ? "Computah: edits allowed" : "Computah: read access allowed");
         }));
         buttons.Children.Add(CardButton("Not now", false, () =>
         {
-            Resolve(card, "Access not allowed.");
-            pendingReport = "[Computah] The user did not give you access to: " + string.Join(", ", paths) +
-                            ". Don't ask again for these unless they bring it up; help with what you can.";
+            Resolve(card, edit ? "Edits not allowed." : "Access not allowed.");
+            pendingReport = $"[Computah] The user did not give you {(edit ? "edit" : "")} access to: " + string.Join(", ", paths) +
+                            (edit ? ". Don't change these files; show the user the change instead (for example as a file card) so they can apply it themselves."
+                                  : ". Don't ask again for these unless they bring it up; help with what you can.");
         }));
         Messages.Children.Add(card);
         Scroller.ScrollToEnd();
@@ -770,6 +791,42 @@ public partial class BubbleWindow : Window
     // ---------- hints ----------
 
     /// Draw the agent's hints on the monitor of the latest screenshot. A new reply replaces older hints.
+    /// The working area of this bubble's monitor, in WPF units (where cards pop up).
+    Rect WorkAreaDips()
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        var wa = hwnd != IntPtr.Zero ? System.Windows.Forms.Screen.FromHandle(hwnd).WorkingArea
+                                     : System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position).WorkingArea;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        return new Rect(wa.Left / dpi.DpiScaleX, wa.Top / dpi.DpiScaleY, wa.Width / dpi.DpiScaleX, wa.Height / dpi.DpiScaleY);
+    }
+
+    /// The agent changed a file: show the change on screen.
+    void ShowChange(FileChange c)
+    {
+        if (closed) return;
+        PeekWindow.ShowChange(c, WorkAreaDips(), this, (path, isUndone) => changeUndone[path] = isUndone);
+    }
+
+    // Undo/redo of the agent's changes: what the file is now vs. what the agent was last told.
+    readonly Dictionary<string, bool> changeUndone = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, bool> agentThinksUndone = new(StringComparer.OrdinalIgnoreCase);
+
+    /// Undo/redo the agent doesn't know about yet (an undo then redo before the next message cancels out).
+    string? UndoNews()
+    {
+        var lines = new List<string>();
+        foreach (var (path, isUndone) in changeUndone)
+        {
+            if (agentThinksUndone.TryGetValue(path, out var known) && known == isUndone) continue;
+            agentThinksUndone[path] = isUndone;
+            lines.Add(isUndone
+                ? $"[Computah] The user UNDID your {path}; the file is back to how it was before that edit."
+                : $"[Computah] The user REDID your {path}; that edit is applied again.");
+        }
+        return lines.Count > 0 ? string.Join("\n", lines) : null;
+    }
+
     void ShowHints(List<HintTag> hints)
     {
         if (closed) return;
@@ -777,10 +834,7 @@ public partial class BubbleWindow : Window
         var peeks = hints.Where(h => h.Type is "file" or "folder" or "open").ToList();
         if (peeks.Count > 0)
         {
-            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-            var wa = System.Windows.Forms.Screen.FromHandle(hwnd).WorkingArea;
-            var dpi = VisualTreeHelper.GetDpi(this);
-            var dips = new Rect(wa.Left / dpi.DpiScaleX, wa.Top / dpi.DpiScaleY, wa.Width / dpi.DpiScaleX, wa.Height / dpi.DpiScaleY);
+            var dips = WorkAreaDips();
             foreach (var p in peeks.Take(3))
                 if (!PeekWindow.Show(p, dips, this)) AddNote($"Couldn't find {p.Get("path") ?? "that file"}.");
             hints = hints.Except(peeks).ToList();

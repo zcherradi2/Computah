@@ -55,17 +55,22 @@ static class Agents
                 if (!string.IsNullOrWhiteSpace(model)) { a.Add("--model"); a.Add(model); }
                 a.Add("--append-system-prompt"); a.Add(Prompts.Build(s));
 
-                // Dropped folders become extra working directories; dropped files get a read permission each.
-                foreach (var dir in shared.Where(Directory.Exists)) { a.Add("--add-dir"); a.Add(dir); }
-                var allow = shared.Where(File.Exists).Select(f => $"Read({f.Replace('\\', '/')})").ToList();
+                var (read, edit) = SharedAccess.Split(shared);
+                static string Glob(string p) => p.Replace('\\', '/') + (Directory.Exists(p) ? "/**" : "");
+
+                // Shared folders become extra working directories; shared files get a read permission each.
+                foreach (var dir in read.Concat(edit).Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase)) { a.Add("--add-dir"); a.Add(dir); }
+                var allow = read.Concat(edit).Where(File.Exists).Select(f => $"Read({f.Replace('\\', '/')})").ToList();
+                // Paths the user allowed edits on (Edit rules cover every file-editing tool).
+                allow.AddRange(edit.Select(p => $"Edit({Glob(p)})"));
                 if (!string.IsNullOrWhiteSpace(s.AllowedTools)) allow.AddRange(s.AllowedTools.Split(' ', StringSplitOptions.RemoveEmptyEntries));
                 if (allow.Count > 0) { a.Add("--allowedTools"); a.AddRange(allow); }
                 if (!s.LoadMcpServers) a.Add("--strict-mcp-config");
                 // Never let the agent open the saved screenshots on its own.
                 a.Add("--disallowedTools"); a.Add($"Read({Paths.Screenshots.Replace('\\', '/')}/**)");
-                // Shared files and folders are read-only for the agent (Edit rules cover every file-editing tool).
-                foreach (var p in shared)
-                    a.Add($"Edit({p.Replace('\\', '/') + (Directory.Exists(p) ? "/**" : "")})");
+                // Everything else that was shared is read-only (a deny would override an edit allowed inside it, so skip those).
+                foreach (var p in read.Where(p => !edit.Any(e => e.StartsWith(p, StringComparison.OrdinalIgnoreCase))))
+                    a.Add($"Edit({Glob(p)})");
                 return a;
             },
             TitleArgs = () => new List<string> { "-p", "--model", "haiku", "--no-session-persistence", "--tools", "", "--strict-mcp-config" },

@@ -26,6 +26,67 @@ sealed class AgentSession : IDisposable
     /// A tool call the agent made: (tool name, the command / path / query it ran with). Background thread.
     public event Action<string, string>? ToolUsed;
 
+    /// The agent changed a file (its edit succeeded). Background thread.
+    public event Action<FileChange>? FileChanged;
+
+    // file edits in flight: stream index → (tool id, name, input JSON so far); tool id → the file before the edit
+    readonly Dictionary<int, (string Id, string Name, StringBuilder Json)> streamingTools = new();
+    readonly Dictionary<string, FileChange> edits = new();
+
+    static bool IsEditTool(string? name) => name is "Edit" or "MultiEdit" or "Write" or "NotebookEdit" or "edit" or "write_file" or "replace";
+
+    void Snapshot(string id, string tool, JsonElement input)
+    {
+        if (id.Length == 0 || edits.ContainsKey(id) || input.ValueKind != JsonValueKind.Object) return;
+        var path = Str(input, "file_path") ?? Str(input, "notebook_path") ?? Str(input, "path") ?? Str(input, "absolute_path");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        if (!Path.IsPathRooted(path)) path = Path.Combine(Paths.Workspace, path);
+        string? before = null;
+        byte[]? bytes = null;
+        try
+        {
+            if (File.Exists(path) && new FileInfo(path).Length < 20_000_000)
+            {
+                bytes = File.ReadAllBytes(path);
+                using var sr = new StreamReader(new MemoryStream(bytes), detectEncodingFromByteOrderMarks: true);
+                before = sr.ReadToEnd();
+            }
+        }
+        catch { }
+        edits[id] = new FileChange(Path.GetFullPath(path), before, null, tool, Str(input, "old_string"), Str(input, "new_string"), agentName, bytes);
+    }
+
+    void FinishChange(FileChange c)
+    {
+        string? after = null;
+        byte[]? afterBytes = null;
+        try
+        {
+            if (File.Exists(c.Path))
+            {
+                afterBytes = File.ReadAllBytes(c.Path);
+                using var sr = new StreamReader(new MemoryStream(afterBytes), detectEncodingFromByteOrderMarks: true);
+                after = sr.ReadToEnd();
+            }
+        }
+        catch { }
+        if (after == null) return;
+        c = c with { AfterBytes = afterBytes };
+        var before = c.Before;
+        // Lost the race (the edit ran before we read the file): rebuild "before" from the edit itself when possible.
+        if (before == after && c.OldText != null && c.NewText != null && c.NewText.Length > 0)
+        {
+            int i = after.IndexOf(c.NewText, StringComparison.Ordinal);
+            if (i >= 0 && after.IndexOf(c.NewText, i + 1, StringComparison.Ordinal) < 0)
+            {
+                before = after[..i] + c.OldText + after[(i + c.NewText.Length)..];
+                c = c with { BeforeBytes = null }; // the saved bytes are already the edited file
+            }
+        }
+        if (before == after) return;
+        FileChanged?.Invoke(c with { Before = before, After = after });
+    }
+
     /// Which conversation this is, for the command log ("title (id)").
     public Func<string>? LogName;
     readonly string agentName = "", permissions = "";
@@ -140,8 +201,27 @@ sealed class AgentSession : IDisposable
                 {
                     var ct = Str(cb, "type");
                     if (ct == "text") { if (turnHasText) Text?.Invoke("\n\n"); }
-                    else if (ct is "tool_use" or "server_tool_use") Status?.Invoke(ToolLabel(Str(cb, "name")));
+                    else if (ct is "tool_use" or "server_tool_use")
+                    {
+                        Status?.Invoke(ToolLabel(Str(cb, "name")));
+                        if (ev.TryGetProperty("index", out var ix) && ix.TryGetInt32(out var bi) && IsEditTool(Str(cb, "name")))
+                            streamingTools[bi] = (Str(cb, "id") ?? "", Str(cb, "name")!, new StringBuilder());
+                    }
                     else if (ct is "thinking" or "redacted_thinking") Status?.Invoke("Thinking…");
+                }
+                else if (et == "content_block_delta" && ev.TryGetProperty("delta", out var jd) && Str(jd, "type") == "input_json_delta"
+                         && ev.TryGetProperty("index", out var jx) && jx.TryGetInt32(out var ji) && streamingTools.TryGetValue(ji, out var st))
+                    st.Json.Append(Str(jd, "partial_json"));
+                else if (et == "content_block_stop" && ev.TryGetProperty("index", out var sx) && sx.TryGetInt32(out var si)
+                         && streamingTools.Remove(si, out var done))
+                {
+                    // The edit's arguments are complete but it hasn't run yet: keep the file as it is now.
+                    try
+                    {
+                        using var inputDoc = JsonDocument.Parse(done.Json.Length > 0 ? done.Json.ToString() : "{}");
+                        Snapshot(done.Id, done.Name, inputDoc.RootElement);
+                    }
+                    catch (Exception ex) { Paths.Log("edit snapshot: " + ex.Message); }
                 }
                 else if (et == "content_block_delta" && ev.TryGetProperty("delta", out var d) && Str(d, "type") == "text_delta")
                 {
@@ -164,6 +244,7 @@ sealed class AgentSession : IDisposable
                             var detail = ToolDetail(name, input);
                             CommandLog.ToolCall(Who, agentName, Permissions, name, FullDetail(name, input, detail), Str(block, "id"));
                             ToolUsed?.Invoke(name, detail);
+                            if (IsEditTool(name) && Str(block, "id") is { } eid && !edits.ContainsKey(eid)) Snapshot(eid, name, input); // fallback
                         }
                 break;
 
@@ -171,8 +252,12 @@ sealed class AgentSession : IDisposable
                 if (r.TryGetProperty("message", out var um) && um.TryGetProperty("content", out var uc) && uc.ValueKind == JsonValueKind.Array)
                     foreach (var block in uc.EnumerateArray())
                         if (Str(block, "type") == "tool_result")
-                            CommandLog.ToolResult(Who, Str(block, "tool_use_id"),
-                                block.TryGetProperty("is_error", out var e) && e.ValueKind == JsonValueKind.True, ResultText(block));
+                        {
+                            bool failed = block.TryGetProperty("is_error", out var e) && e.ValueKind == JsonValueKind.True;
+                            var rid = Str(block, "tool_use_id");
+                            CommandLog.ToolResult(Who, rid, failed, ResultText(block));
+                            if (rid != null && edits.Remove(rid, out var change) && !failed) FinishChange(change);
+                        }
                 break;
 
             case "result":

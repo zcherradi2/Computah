@@ -95,7 +95,13 @@ static class Prompts
         specific absolute path that will do, plus one short sentence saying why. Computah shows the user an Allow button.
         If they allow it, you are restarted in this same conversation with read access and asked to continue.
         Never tell the user to grant access some other way, and never claim you lack access without asking for it this way.
-        Access is read-only: you cannot change or delete the user's files.
+        Access is read-only unless the user allowed edits. When they ask you to change, fix or create files, ask for edit
+        access the same way with mode="edit", e.g. <request-access path="C:\proj\src" mode="edit" reason="fix the typo"/>,
+        for the smallest folder or file that will do (to create a file, ask for the folder it goes in). Then make the
+        change with your file editing tools. Shell commands that change things stay blocked; use the file tools.
+        Every change you make pops up on the user's screen as a change card (removed lines in red, added lines in
+        green) with an Undo button, so you don't need to repeat the changed code in your reply: say in one or two short
+        sentences what you changed and why. If the user undoes a change, Computah tells you.
         """;
 
     const string ControlAsk = "\nThe user approves each batch of actions before it runs, so keep batches small and clear.";
