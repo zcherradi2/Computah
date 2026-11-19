@@ -57,6 +57,12 @@ public partial class BubbleWindow : Window
     public bool IsClosed => closed;
 
     public string AgentId => agent.Id;
+    public bool IsStreaming => streaming;
+
+    /// History, streaming state or session id changed.
+    public event Action? Changed;
+    /// The user clicked into this bubble.
+    public event Action? UserFocused;
 
     public BubbleWindow(Settings settings, AgentInfo agent, string? resumeId = null, IReadOnlyList<Turn>? history = null)
     {
@@ -86,7 +92,8 @@ public partial class BubbleWindow : Window
         SizeChanged += (_, _) => { if (!userMoved) PlaceNearCursor(); };
         Loaded += OnLoaded;
         Closed += OnClosed;
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Close(); } };
+        Activated += (_, _) => UserFocused?.Invoke();
+        PreviewKeyDown +=(_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Close(); } };
         CompositionTarget.Rendering += OnFrame;
 
         // Start claude right away so it is warm by the time the user hits Enter.
@@ -312,6 +319,7 @@ public partial class BubbleWindow : Window
             { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
         else
             Dot.BeginAnimation(OpacityProperty, null);
+        Changed?.Invoke();
     }
 
     // Smooth typing: drain the received text a little each frame, faster when there's a backlog.
@@ -360,6 +368,7 @@ public partial class BubbleWindow : Window
             History.Add(new Turn(false, current.Text, null));
         }
         if (IsActive) Input.Focus();
+        Changed?.Invoke();
         if (sendRequested && contextReady) SendAsIs();
     }
 

@@ -18,3 +18,7 @@ C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\Computah.genruntimeconfig
 C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\ref\Computah.dll
 C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\PickerWindow.baml
 C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\PickerWindow.g.cs
+C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\DockWindow.baml
+C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\SessionsPanel.baml
+C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\DockWindow.g.cs
+C:\Users\pc\Desktop\assist\obj\Release\net10.0-windows\src\SessionsPanel.g.cs

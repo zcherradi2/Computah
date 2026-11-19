@@ -61,6 +61,18 @@ static class Native
         finally { CloseHandle(h); }
     }
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr h, int i);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr v);
+
+    /// Tool window (not in Alt+Tab) that never takes focus when clicked.
+    public static void MakeNoActivate(IntPtr hwnd)
+    {
+        const int GWL_EXSTYLE = -20;
+        const long WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
+        var ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(ex | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE));
+    }
+
     public static bool IsDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
     public static void SendKeys(params (int vk, bool up)[] keys)

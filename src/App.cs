@@ -1,12 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
 using System.IO;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
 using Microsoft.Win32;
@@ -33,19 +32,19 @@ public static class Program
 
 sealed class AssistHost : IDisposable
 {
-    const int HotkeyContinue = 1; // Ctrl+Alt+A: add to the latest session
+    const int HotkeyContinue = 1; // Ctrl+Alt+A: add to the target session
     const int HotkeyNew = 2;      // Alt+A: start a new session
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "Computah";
 
     readonly Application app;
     readonly HwndSource msgWindow;
     readonly WF.NotifyIcon tray;
+    readonly SessionStore store = SessionStore.Load();
+    DockWindow? dock;
+    SessionsPanel? panel;
+    PickerWindow? picker;
     bool busy, sendQueued;
     int busyHotkey;
-
-    readonly List<BubbleWindow> open = new();   // open bubbles, newest last
-    string? lastSessionId, lastAgentId;         // latest conversation, kept after its bubble closes
-    List<Turn>? lastHistory;
 
     public AssistHost(Application app)
     {
@@ -56,12 +55,18 @@ sealed class AssistHost : IDisposable
         { ParentWindow = new IntPtr(-3), WindowStyle = 0, Width = 0, Height = 0 });
         msgWindow.AddHook(WndProc);
 
-        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Computah — Alt+A new, Ctrl+Alt+A continue", Visible = true };
+        var settings = Settings.Load(); // creates settings.json on first run
+
+        tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Computah: Alt+A new, Ctrl+Alt+A continue", Visible = true };
         var menu = new WF.ContextMenuStrip();
         menu.Items.Add("New session  (Alt+A)", null, (_, _) => Trigger(HotkeyNew));
-        menu.Items.Add("Continue latest session  (Ctrl+Alt+A)", null, (_, _) => Trigger(HotkeyContinue));
+        menu.Items.Add("Continue target session  (Ctrl+Alt+A)", null, (_, _) => Trigger(HotkeyContinue));
+        menu.Items.Add("Sessions…", null, (_, _) => TogglePanel());
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Choose agent…", null, (_, _) => ShowPicker(firstRun: false));
+        var showDock = new WF.ToolStripMenuItem("Show floating button") { Checked = settings.ShowDock, CheckOnClick = true };
+        showDock.CheckedChanged += (_, _) => { var s = Settings.Load(); s.ShowDock = showDock.Checked; s.Save(); SetDockVisible(showDock.Checked); };
+        menu.Items.Add(showDock);
         menu.Items.Add("Open screenshots folder", null, (_, _) => Shell(Paths.Screenshots, true));
         menu.Items.Add("Edit settings", null, (_, _) => { Settings.Load(); Shell(Paths.SettingsFile, false); });
         var startup = new WF.ToolStripMenuItem("Start with Windows") { Checked = IsStartupEnabled(), CheckOnClick = true };
@@ -70,6 +75,7 @@ sealed class AssistHost : IDisposable
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => app.Shutdown());
         tray.ContextMenuStrip = menu;
+        tray.MouseClick += (_, e) => { if (e.Button == WF.MouseButtons.Left) TogglePanel(); };
 
         var failed = new List<string>();
         if (!Native.RegisterHotKey(msgWindow.Handle, HotkeyContinue, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Native.VK_A))
@@ -78,36 +84,13 @@ sealed class AssistHost : IDisposable
             failed.Add("Alt+A");
         if (failed.Count > 0)
             tray.ShowBalloonTip(4000, "Computah", string.Join(" and ", failed) + " already used by another app.", WF.ToolTipIcon.Warning);
-        else
-            tray.ShowBalloonTip(2500, "Computah is running", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
 
-        // First run (or the chosen agent was uninstalled): ask which agent to use.
-        var s = Settings.Load(); // creates settings.json on first run
-        if (Agents.Resolve(s) == null)
-            app.Dispatcher.BeginInvoke(() => ShowPicker(firstRun: string.IsNullOrEmpty(s.Agent)));
-    }
-
-    PickerWindow? picker;
-
-    void ShowPicker(bool firstRun)
-    {
-        if (picker != null) { picker.Activate(); return; }
-        var current = Settings.Load().Agent;
-        picker = new PickerWindow(current, firstRun);
-        picker.Closed += (_, _) =>
+        app.Dispatcher.BeginInvoke(() =>
         {
-            var chosen = picker.Chosen;
-            picker = null;
-            if (chosen == null) return;
-            var s = Settings.Load();
-            s.Agent = chosen;
-            s.Save();
-            var name = Agents.All().First(a => a.Id == chosen).Name;
-            tray.Text = $"Computah ({name}) — Alt+A new, Ctrl+Alt+A continue";
-            tray.ShowBalloonTip(2500, $"Computah will use {name}", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
-        };
-        picker.Show();
-        picker.Activate();
+            SetDockVisible(settings.ShowDock);
+            // First run (or the chosen agent was uninstalled): ask which agent to use.
+            if (Agents.Resolve(settings) == null) ShowPicker(firstRun: string.IsNullOrEmpty(settings.Agent));
+        });
     }
 
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -120,13 +103,16 @@ sealed class AssistHost : IDisposable
         return IntPtr.Zero;
     }
 
+    // ---------- hotkeys ----------
+
     /// First press captures the screen into a compact input; pressing the same hotkey again sends it as is.
-    /// Alt+A always starts a new session. Ctrl+Alt+A adds to the newest open bubble, or reopens the last
-    /// closed conversation (claude --resume), or starts fresh if there is none.
-    async void Trigger(int hotkey)
+    /// Alt+A starts a new session. Ctrl+Alt+A adds to the target session (picked in the sessions panel, or
+    /// the last one used), reopening its bubble with history if it was closed.
+    /// `explicitTarget` is set when a session is opened from the panel (no selection grab then).
+    async void Trigger(int hotkey, SessionRecord? explicitTarget = null)
     {
-        var newest = open.Count > 0 ? open[^1] : null;
-        if (newest != null && newest.CanSendAsIs(hotkey)) { newest.SendAsIs(); return; }
+        var focusedWin = store.Focused?.Window;
+        if (explicitTarget == null && focusedWin != null && focusedWin.CanSendAsIs(hotkey)) { focusedWin.SendAsIs(); return; }
         if (busy) { if (hotkey == busyHotkey) sendQueued = true; return; } // fast double press during capture
 
         var settings = Settings.Load();
@@ -140,16 +126,21 @@ sealed class AssistHost : IDisposable
         {
             var ctx = await ContextCapture.CaptureAsync(settings);
 
+            SessionRecord? rec = hotkey == HotkeyContinue ? explicitTarget ?? store.Focused : null;
             BubbleWindow w;
-            if (hotkey == HotkeyContinue && newest != null) w = newest;
-            else if (hotkey == HotkeyContinue && lastSessionId != null && lastAgentId == agent.Id)
-                w = Track(new BubbleWindow(settings, agent, lastSessionId, lastHistory));
-            else w = Track(new BubbleWindow(settings, agent));
+            if (rec?.Window != null) w = rec.Window;
+            else if (rec != null && Agents.ById(rec.AgentId) is { } recAgent) w = OpenBubble(rec, recAgent, settings);
+            else
+            {
+                rec = store.Create(agent.Id);
+                w = OpenBubble(rec, agent, settings);
+            }
+            SetFocused(rec);
 
             w.AttachContext(ctx, hotkey);
             if (!w.IsVisible) w.Show();
             if (sendQueued) w.SendAsIs(); // runs once the selection grab finishes
-            await ContextCapture.GrabSelectionAsync(ctx, settings);
+            if (explicitTarget == null) await ContextCapture.GrabSelectionAsync(ctx, settings);
             w.ContextReady(ctx);
         }
         catch (Exception ex)
@@ -160,21 +151,115 @@ sealed class AssistHost : IDisposable
         finally { busy = false; }
     }
 
-    BubbleWindow Track(BubbleWindow w)
+    BubbleWindow OpenBubble(SessionRecord rec, AgentInfo agent, Settings settings)
     {
-        open.Add(w);
+        var w = new BubbleWindow(settings, agent, rec.AgentSessionId, rec.History);
+        rec.Window = w;
+        w.Changed += () =>
+        {
+            rec.History = w.History.ToList();
+            rec.AgentSessionId = w.SessionId ?? rec.AgentSessionId;
+            if (w.HasConversation) rec.Updated = DateTime.Now;
+            store.Save();
+            RefreshUi();
+        };
+        w.UserFocused += () => { if (store.FocusedId != rec.Id) SetFocused(rec); };
         w.Closed += (_, _) =>
         {
-            open.Remove(w);
-            if (w.HasConversation && w.SessionId != null)
-            {
-                lastSessionId = w.SessionId;
-                lastAgentId = w.AgentId;
-                lastHistory = w.History.ToList();
-            }
+            rec.Window = null;
+            if (rec.History.Count == 0) store.Remove(rec); // opened and closed without sending: don't keep it
+            store.Save();
+            RefreshUi();
         };
         return w;
     }
+
+    // ---------- sessions ----------
+
+    void SetFocused(SessionRecord rec)
+    {
+        if (!store.Sessions.Contains(rec)) store.Sessions.Add(rec);
+        store.FocusedId = rec.Id;
+        store.Save();
+        RefreshUi();
+    }
+
+    void RefreshUi()
+    {
+        dock?.Refresh();
+        panel?.Refresh();
+    }
+
+    void SetDockVisible(bool visible)
+    {
+        if (visible && dock == null)
+        {
+            dock = new DockWindow(store);
+            dock.Clicked += TogglePanel;
+            dock.Show();
+            dock.Refresh();
+        }
+        else if (!visible && dock != null)
+        {
+            panel?.SafeClose();
+            dock.Close();
+            dock = null;
+        }
+    }
+
+    void TogglePanel()
+    {
+        if (panel != null) { panel.SafeClose(); return; }
+        if (dock == null) SetDockVisible(true); // the panel is anchored to the button
+        panel = new SessionsPanel(store, dock!);
+        panel.FocusRequested += SetFocused;
+        panel.OpenRequested += async rec =>
+        {
+            panel?.SafeClose();
+            await Task.Delay(160); // let the panel disappear before the screenshot
+            Trigger(HotkeyContinue, rec);
+        };
+        panel.DeleteRequested += rec =>
+        {
+            var w = rec.Window;
+            store.Remove(rec);
+            store.Save();
+            w?.Close();
+            RefreshUi();
+        };
+        panel.NewRequested += async () =>
+        {
+            panel?.SafeClose();
+            await Task.Delay(160);
+            Trigger(HotkeyNew);
+        };
+        panel.Closed += (_, _) => panel = null;
+        panel.Show();
+        panel.Activate();
+    }
+
+    // ---------- agent picker ----------
+
+    void ShowPicker(bool firstRun)
+    {
+        if (picker != null) { picker.Activate(); return; }
+        picker = new PickerWindow(Settings.Load().Agent, firstRun);
+        picker.Closed += (_, _) =>
+        {
+            var chosen = picker.Chosen;
+            picker = null;
+            if (chosen == null) return;
+            var s = Settings.Load();
+            s.Agent = chosen;
+            s.Save();
+            var name = Agents.NameOf(chosen);
+            tray.ShowBalloonTip(2500, $"Computah will use {name}", "Alt+A: new session · Ctrl+Alt+A: continue", WF.ToolTipIcon.None);
+        };
+        picker.Show();
+        picker.Activate();
+    }
+
+    // ---------- misc ----------
 
     static void Shell(string path, bool folder)
     {
@@ -208,6 +293,7 @@ sealed class AssistHost : IDisposable
 
     public void Dispose()
     {
+        store.Save();
         Native.UnregisterHotKey(msgWindow.Handle, HotkeyContinue);
         Native.UnregisterHotKey(msgWindow.Handle, HotkeyNew);
         tray.Visible = false;

@@ -90,6 +90,17 @@ static class Agents
         return a.Installed ? a : null;
     }
 
+    /// A specific agent by id, if installed.
+    public static AgentInfo? ById(string id)
+    {
+        var a = All().FirstOrDefault(x => x.Id == id);
+        if (a == null) return null;
+        a.Path = Locate(a);
+        return a.Installed ? a : null;
+    }
+
+    public static string NameOf(string id) => All().FirstOrDefault(x => x.Id == id)?.Name ?? id;
+
     static string? Locate(AgentInfo a)
     {
         var dirs = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(System.IO.Path.PathSeparator)

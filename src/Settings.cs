@@ -62,7 +62,9 @@ public sealed class Settings
         "Answer briefly and directly. Use plain text: short paragraphs and simple '-' bullets. " +
         "No headings, no tables, no bold/italics markup. Code may go in plain indented lines.";
 
-    public bool CaptureSelection { get; set; } = true;  // sends Ctrl+C to grab selected text (clipboard is restored)
+    public bool ShowDock { get; set; } = true;            // floating Computah button with the sessions list
+
+    public bool CaptureSelection { get; set; } = true; // sends Ctrl+C to grab selected text (clipboard is restored)
     public bool SendCursorCrop { get; set; } = true;     // extra full-resolution crop around the pointer
     public bool LoadMcpServers { get; set; } = false;    // MCP servers slow down startup
     public string AllowedTools { get; set; } = "";       // e.g. "Read WebSearch WebFetch"
