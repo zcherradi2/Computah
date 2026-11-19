@@ -756,7 +756,12 @@ public partial class BubbleWindow : Window
         if (res.Stopped == null && res.Look && autoTurns < 10 && !closed)
         {
             await Task.Delay(450);  // let the screen settle
-            try { shot = await ContextCapture.CaptureAsync(Settings.Load()); } catch (Exception ex) { Paths.Log("look: " + ex.Message); }
+            try
+            {
+                shot = await ContextCapture.CaptureAsync(Settings.Load());
+                await shot.WaitForElements(2500); // the element list makes the next clicks exact
+            }
+            catch (Exception ex) { Paths.Log("look: " + ex.Message); }
         }
 
         acting = false;

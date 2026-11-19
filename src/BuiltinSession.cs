@@ -146,7 +146,7 @@ sealed class BuiltinSession : IAgentSession
             Tools = Tools(),
             Messages = history.Select(ToParam).ToList(),
             CacheControl = new CacheControlEphemeral(), // cache the conversation so far, too
-            OutputConfig = provider.Effort ? new OutputConfig { Effort = Effort.Medium } : null,
+            OutputConfig = ThinkingLevel() is { } level ? new OutputConfig { Effort = level } : null,
         };
         var agg = new MessageContentAggregator();
         bool textBefore = continuing, inText = false;
@@ -172,6 +172,18 @@ sealed class BuiltinSession : IAgentSession
         _ = inText;
         return agg.Message();
     }
+
+    /// settings.thinking for this agent → the effort sent with each request (null = don't send it).
+    /// Claude's thinking can't be switched off on current models, so "off" there means the lowest effort.
+    /// On DeepSeek, sending any effort switches on its reasoning mode; not sending it keeps the fast mode.
+    Effort? ThinkingLevel() => settings.ThinkingFor(agent.Id) switch
+    {
+        "off" or "none" or "fast" => provider.Effort ? Effort.Low : null,
+        "low" => Effort.Low,
+        "on" or "medium" => Effort.Medium,
+        "high" or "max" => Effort.High,
+        _ => provider.Effort ? Effort.Medium : null, // default
+    };
 
     string SystemPrompt() => Prompts.Build(settings) + "\n\n" + Prompts.BuiltinTools(shellDir, readable, editable);
 

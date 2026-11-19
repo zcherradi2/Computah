@@ -73,6 +73,11 @@ public sealed class Settings
     public bool LoadMcpServers { get; set; } = false;    // MCP servers slow down startup
     public string AllowedTools { get; set; } = "";       // e.g. "Read WebSearch WebFetch"
 
+    /// Built-in agents: how hard the model thinks before answering, per agent id: "off", "low", "medium", "high".
+    /// Missing = the agent's default (Claude: medium; DeepSeek: off, i.e. its fast non-reasoning mode).
+    public Dictionary<string, string> Thinking { get; set; } = new();
+    public string ThinkingFor(string agent) => Thinking.TryGetValue(agent, out var t) ? t.Trim().ToLowerInvariant() : "";
+
     static readonly JsonSerializerOptions Opts = new()
     {
         WriteIndented = true,

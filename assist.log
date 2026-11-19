@@ -1,0 +1,42 @@
+[2026-11-19 16:44:55] ui scan window: SafeHandle cannot be null. (Parameter 'pHandle')
+[2026-11-19 16:44:55] ui scan window: SafeHandle cannot be null. (Parameter 'pHandle')
+[2026-11-19 16:44:55] ui scan window: SafeHandle cannot be null. (Parameter 'pHandle')
+[2026-11-19 16:44:55] ui scan window: SafeHandle cannot be null. (Parameter 'pHandle')
+[2026-11-19 16:49:31] builtin turn: System.Threading.Tasks.TaskCanceledException: The operation was canceled.
+ ---> System.IO.IOException: Unable to read data from the transport connection: The I/O operation has been aborted because of either a thread exit or an application request..
+ ---> System.Net.Sockets.SocketException (995): The I/O operation has been aborted because of either a thread exit or an application request.
+   --- End of inner exception stack trace ---
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.ThrowException(SocketError error, CancellationToken cancellationToken)
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource<System.Int32>.GetResult(Int16 token)
+   at System.Net.Security.SslStream.EnsureFullTlsFrameAsync[TIOAdapter](CancellationToken cancellationToken, Int32 estimatedSize)
+   at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource<TResult>.GetResult(Int16 token)
+   at System.Net.Security.SslStream.ReadAsyncInternal[TIOAdapter](Memory`1 buffer, CancellationToken cancellationToken)
+   at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource<TResult>.GetResult(Int16 token)
+   at System.Net.Http.HttpConnection.FillAsync(Boolean async)
+   at System.Net.Http.HttpConnection.ChunkedEncodingReadStream.ReadAsyncCore(Memory`1 buffer, CancellationToken cancellationToken)
+   --- End of inner exception stack trace ---
+   at System.Net.Http.HttpConnection.ChunkedEncodingReadStream.ReadAsyncCore(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Compression.DeflateStream.<ReadAsyncMemory>g__Core|55_0(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.Net.ServerSentEvents.SseParser`1.FillLineBufferAsync(CancellationToken cancellationToken)
+   at System.Net.ServerSentEvents.SseParser`1.EnumerateAsync(CancellationToken cancellationToken)+MoveNext()
+   at System.Net.ServerSentEvents.SseParser`1.EnumerateAsync(CancellationToken cancellationToken)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at Anthropic.Core.Sse.Enumerate[T](HttpResponseMessage response, CancellationToken cancellationToken)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Core/Sse.cs:line 26
+   at Anthropic.Core.Sse.Enumerate[T](HttpResponseMessage response, CancellationToken cancellationToken)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Core/Sse.cs:line 26
+   at Anthropic.Core.Sse.Enumerate[T](HttpResponseMessage response, CancellationToken cancellationToken)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at Anthropic.Services.MessageServiceWithRawResponse.<>c__DisplayClass7_0.<<CreateStreaming>g__Enumerate|3>d.MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Services/MessageService.cs:line 219
+--- End of stack trace from previous location ---
+   at Anthropic.Services.MessageServiceWithRawResponse.<>c__DisplayClass7_0.<<CreateStreaming>g__Enumerate|3>d.MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Services/MessageService.cs:line 219
+--- End of stack trace from previous location ---
+   at Anthropic.Services.MessageServiceWithRawResponse.<>c__DisplayClass7_0.<<CreateStreaming>g__Enumerate|3>d.System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult(Int16 token)
+   at Anthropic.Core.StreamingHttpResponse`1.Enumerate(CancellationToken cancellationToken)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Core/HttpResponse.cs:line 278
+   at Anthropic.Core.StreamingHttpResponse`1.Enumerate(CancellationToken cancellationToken)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Core/HttpResponse.cs:line 278
+   at Anthropic.Core.StreamingHttpResponse`1.Enumerate(CancellationToken cancellationToken)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at Anthropic.Services.MessageService.CreateStreaming(MessageCreateParams parameters, CancellationToken cancellationToken)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Services/MessageService.cs:line 71
+   at Anthropic.Services.MessageService.CreateStreaming(MessageCreateParams parameters, CancellationToken cancellationToken)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Services/MessageService.cs:line 71
+   at Anthropic.Services.MessageService.CreateStreaming(MessageCreateParams parameters, CancellationToken cancellationToken)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at Anthropic.Helpers.SseAggregator`2.CollectAsync(IAsyncEnumerable`1 messageStream)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Helpers/SseAggregator.cs:line 43
+   at Anthropic.Helpers.SseAggregator`2.CollectAsync(IAsyncEnumerable`1 messageStream)+MoveNext() in /home/runner/work/anthropic-sdk-csharp/anthropic-sdk-csharp/src/Anthropic/Helpers/SseAggregator.cs:line 43
+   at Anthropic.Helpers.SseAggregator`2.CollectAsync(IAsyncEnumerable`1 messageStream)+System.Threading.Tasks.Sources.IValueTaskSource<System.Boolean>.GetResult()
+   at Assist.BuiltinSession.Stream(AnthropicClient client, Boolean continuing) in C:\Users\pc\Desktop\assist\src\BuiltinSession.cs:line 153
+   at Assist.BuiltinSession.Stream(AnthropicClient client, Boolean continuing) in C:\Users\pc\Desktop\assist\src\BuiltinSession.cs:line 153
+   at Assist.BuiltinSession.RunTurn(Turn user) in C:\Users\pc\Desktop\assist\src\BuiltinSession.cs:line 89

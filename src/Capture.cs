@@ -33,6 +33,16 @@ public sealed class CapturedContext
 
     public bool HasClipboard => ClipboardText != null || ClipboardImageJpeg != null || ClipboardFiles.Count > 0;
 
+    /// The focused window's buttons, links, fields... (Windows accessibility), scanned in the background while capturing.
+    public Task<UiMap?>? ElementsTask;
+    public UiMap? Elements => ElementsTask is { IsCompletedSuccessfully: true } t ? t.Result : null;
+
+    /// Waits a little for the element scan when it is still running (used before sending).
+    public async Task WaitForElements(int ms)
+    {
+        if (ElementsTask is { IsCompleted: false } t) await Task.WhenAny(t, Task.Delay(ms));
+    }
+
     public List<object> ImageBlocks()
     {
         var list = new List<object>();
@@ -68,6 +78,7 @@ public sealed class CapturedContext
         if (!IncludeScreen) withheld.Add("screenshot");
         if (!IncludeSelection && SelectedText != null) withheld.Add("selected text");
         if (!IncludeClipboard && HasClipboard) withheld.Add("clipboard");
+        if (IncludeScreen && Elements is { } ui) sb.AppendLine(UiElements.Describe(ui, Monitor, FullW, FullH));
         if (withheld.Count > 0)
             sb.AppendLine($"The user chose NOT to share: {string.Join(", ", withheld)}. Do not try to obtain it any other way.");
 
@@ -116,6 +127,7 @@ static class ContextCapture
         // 1) Screenshot of the monitor under the pointer (grabbed first, before anything changes).
         var screen = WF.Screen.FromPoint(new Point(pt.X, pt.Y));
         c.Monitor = screen.Bounds;
+        c.ElementsTask = UiElements.ScanAsync(fg, c.Monitor); // runs alongside the screenshot
         var bmp = new Bitmap(c.Monitor.Width, c.Monitor.Height, PixelFormat.Format24bppRgb);
         using (var g = Graphics.FromImage(bmp))
             g.CopyFromScreen(c.Monitor.X, c.Monitor.Y, 0, 0, c.Monitor.Size, CopyPixelOperation.SourceCopy);

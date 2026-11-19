@@ -102,6 +102,38 @@ public sealed class ScreenMap
         sy = (double)c.Monitor.Height / Math.Max(1, c.FullH);
         hasCrop = c.CropJpeg != null;
         cropX = c.CropX; cropY = c.CropY;
+        Elements = c.Elements;
+    }
+
+    /// The focused window's numbered elements at capture time (element="N" in hints and actions).
+    public UiMap? Elements { get; init; }
+
+    /// Turns element="N" into the coordinates the hint or action uses (Image 1): the element's centre, its box for
+    /// frames, its bottom edge for underlines. False when the tag names an element that isn't in the list.
+    public bool ResolveElement(HintTag t, string kind)
+    {
+        var raw = t.Get("element") ?? t.Get("el");
+        if (raw == null) return true;
+        if (!int.TryParse(raw.Trim().TrimStart('#').Trim('[', ']'), out var id) || Elements?.Get(id) is not { } e) return false;
+        double X(double px) => (px - Monitor.X) / sx;
+        double Y(double py) => (py - Monitor.Y) / sy;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string F(double v) => Math.Round(v, 1).ToString(inv);
+        var r = e.Rect;
+        t.Attr["image"] = "1";
+        switch (kind)
+        {
+            case "box" or "frame" or "highlight" or "rect":
+                t.Attr["x"] = F(X(r.Left)); t.Attr["y"] = F(Y(r.Top)); t.Attr["w"] = F(r.Width / sx); t.Attr["h"] = F(r.Height / sy);
+                break;
+            case "underline" or "line":
+                t.Attr["x1"] = F(X(r.Left)); t.Attr["x2"] = F(X(r.Right)); t.Attr["y1"] = t.Attr["y2"] = F(Y(r.Bottom + 2));
+                break;
+            default:
+                t.Attr["x"] = F(X(r.X + r.Width / 2.0)); t.Attr["y"] = F(Y(r.Y + r.Height / 2.0));
+                break;
+        }
+        return true;
     }
 
     public Point ToScreen(double x, double y, int image) =>
@@ -184,6 +216,7 @@ public sealed class HintOverlay : Window
 
     void AddNow(HintTag tag, ScreenMap map)
     {
+        if (!map.ResolveElement(tag, tag.Type)) { Paths.Log($"hint: element {tag.Get("element")} not found"); return; }
         bool drawing = tag.Type is "draw" or "drawing" or "sketch" or "svg";
         double seconds = Math.Clamp(double.IsNaN(tag.Num("seconds")) ? 10 : tag.Num("seconds"), 2, drawing ? 120 : 30);
         Item? item = tag.Type switch

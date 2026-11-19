@@ -18,8 +18,9 @@ static class ActionRunner
     /// Plain-language description, for the approval card and the report back to the agent.
     public static string Describe(HintTag a) => (a.Get("type") ?? "").ToLowerInvariant() switch
     {
-        "click" => $"{(a.Get("count") == "2" ? "Double-click" : a.Get("button") == "right" ? "Right-click" : "Click")} at ({a.Get("x")}, {a.Get("y")})",
-        "type" => $"Type \"{Short(a.Get("text") ?? "")}\"",
+        "click" => $"{(a.Get("count") == "2" ? "Double-click" : a.Get("button") == "right" ? "Right-click" : "Click")} " +
+                   (a.Get("element") is { } el ? $"element {el}" : $"at ({a.Get("x")}, {a.Get("y")})"),
+        "type" => $"Type \"{Short(a.Get("text") ?? "")}\"" + (a.Get("element") is { } te ? $" into element {te}" : ""),
         "key" => $"Press {a.Get("keys")}",
         "scroll" => $"Scroll {(int.TryParse(a.Get("amount"), out var n) && n < 0 ? "up" : "down")} at ({a.Get("x")}, {a.Get("y")})",
         "drag" => $"Drag from ({a.Get("x1")}, {a.Get("y1")}) to ({a.Get("x2")}, {a.Get("y2")})",
@@ -58,7 +59,26 @@ static class ActionRunner
 
             var type = (a.Get("type") ?? "").ToLowerInvariant();
             if (type == "look") { look = true; continue; }
-            if (NeedsScreen(a) && stale)
+            // element="N": aim at that element (exact). Typing into one clicks it first.
+            if (a.Get("element") != null && !stale && map != null)
+            {
+                if (!map.ResolveElement(a, "click")) { done.Add($"(skipped: element {a.Get("element")} is not in the list)"); continue; }
+                if ((a.Get("type") ?? "").ToLowerInvariant() == "type")
+                {
+                    var at = Target(a, "x", "y", map);
+                    if (at != null)
+                    {
+                        flash?.Invoke(at.Value);
+                        await Glide(expected, at.Value);
+                        expected = at.Value;
+                        await Task.Delay(180);
+                        if (Moved(expected)) return new(false, "you moved the mouse", done);
+                        Native.Click("left", 1);
+                        await Task.Delay(150);
+                    }
+                }
+            }
+            if ((NeedsScreen(a) || a.Get("element") != null) && stale)
                 return new(true, null, done, actions.Skip(ai).Where(x => (x.Get("type") ?? "") != "look").Select(Describe).ToList(), staleWhy);
 
             switch (type)

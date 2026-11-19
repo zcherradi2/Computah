@@ -185,6 +185,22 @@ Not done yet for the built-in agent:
 
 ---
 
+### UI element map (`src/UiElements.cs`)
+
+Every capture also scans the focused window through Windows UI Automation (accessibility), in parallel with the screenshot.
+
+- **What's scanned:**
+  - the focused window, plus popups of the same app in front of it, such as open menus and dropdown lists
+  - only visible buttons, links, fields (with their values), dropdowns, checkboxes, tabs (at most 8), menu items, list and tree items, rows, columns and texts
+- **Limits:** at most 180 interactive items and 60 texts, deduplicated and numbered in reading order.
+- **Speed:** about 80 to 190 ms on a large Chrome page.
+- **What the agent sees:** a numbered list (`[48] button "Ajouter gamme" (1478,239)`) with each element's centre in Image 1.
+- **Targeting:** hints and actions take `element="N"`, and `ScreenMap.ResolveElement` turns it into exact coordinates: the centre for clicks and points, the box for frames, the bottom edge for underlines. `<action type="type" element="5" text="…"/>` clicks the field first.
+- **Action loop:** a "look" waits up to 2.5 s for the list. Element numbers count as stale after a `focus` action, just like coordinates.
+- **Why:** pixel coordinates are reliable only on models trained for computer use (Claude). The list lets weaker models such as DeepSeek click by name.
+- **Limits:** things without accessibility info, such as bare icon buttons in some web apps, canvases and games, still need x/y.
+- Not done yet: numbered marks drawn on the screenshot (set-of-marks).
+
 ## 5. What the agent is told (Prompts.cs)
 
 1. **Identity and input:** what Computah sends (image 1 scaled, image 2 crop, app, pointer, selection), and that withheld items must not be fetched another way. Reply style: short, plain text.

@@ -12,5 +12,6 @@
   "captureSelection": true,
   "sendCursorCrop": true,
   "loadMcpServers": false,
-  "allowedTools": ""
+  "allowedTools": "",
+  "thinking": {}
 }
