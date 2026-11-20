@@ -1,6 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)whisper.net.runtime.metal\1.9.1\build\Whisper.net.Runtime.Metal.targets" Condition="Exists('$(NuGetPackageRoot)whisper.net.runtime.metal\1.9.1\build\Whisper.net.Runtime.Metal.targets')" />
+    <Import Project="$(NuGetPackageRoot)whisper.net.runtime\1.9.1\build\Whisper.net.Runtime.targets" Condition="Exists('$(NuGetPackageRoot)whisper.net.runtime\1.9.1\build\Whisper.net.Runtime.targets')" />
     <Import Project="$(NuGetPackageRoot)sqlite\3.53.4\buildTransitive\net9.0\SQLite.targets" Condition="Exists('$(NuGetPackageRoot)sqlite\3.53.4\buildTransitive\net9.0\SQLite.targets')" />
   </ImportGroup>
 </Project>

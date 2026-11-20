@@ -231,6 +231,19 @@ Every capture also scans the focused window through Windows UI Automation (acces
 - **What the agent is told** (with 2+ monitors, a `MONITORS:` block in each capture): the monitors and which one is shown, where the pointer and the focused window are, and up to 6 windows per monitor. Click-through overlays (GPU overlays, Computah's hints) and cloaked windows are left out.
 - **Hints:** `<hint type="window" title="…" process="…"/>` frames a whole window on any monitor (front-most title match, exact before partial; no title = focused window). `<hint type="monitor" monitor="N"/>` makes a monitor's edges glow with a big label. Neither needs a screenshot, and neither vanishes on hover (the mouse is often already inside); default 8 s. A window hint that finds nothing is reported back to the agent.
 
+### Voice input (`src/Voice.cs`)
+
+- **Done in Computah, not by the agents:** the agents take text and images only (Claude Code's `stream-json`, DeepSeek), so Computah transcribes and sends the text. Works the same for every agent.
+- **How to talk:** hold the hotkey (keep **A** down after Alt+A / Ctrl+Alt+A for 350 ms) and speak; release to send. The screenshot is the one taken when you started. Or click the **mic** in the bubble, talk, click again. Tapping and double-tapping are unchanged.
+- **Engine:** whisper.cpp through `Whisper.net` 1.9.1 + `Whisper.net.Runtime` (CPU, bundled: nothing to install, no GPU needed). Microphone through `NAudio.WinMM` (16 kHz mono, max 2 min).
+- **Model:** downloaded once on first use from Hugging Face (`ggerganov/whisper.cpp`) to `%LOCALAPPDATA%\Computah\models\`, with progress in the bubble. `voiceModel`: `base` (60 MB, default) or `small` (190 MB). Tray → Voice.
+- **Measured** on an i5-12400F, CPU only, 6.8 s of speech: base 2.2 s, small 7.4 s. Silence is skipped without running the model.
+- **Screen words as prompt:** the window title and element names are passed as Whisper's prompt. Without it "click Ajouter gamme" came out as "click a jitter gammie"; with it, correct.
+- **The agent is told** the message was spoken ("expect small recognition errors").
+- **Settings:** `voice` (true), `voiceModel` ("base"), `voiceLanguage` ("auto" or a code like "fr").
+- **Not verified yet:** a real hold-to-talk with a human voice (tests used a synthesized voice and a 2 s live mic recording); whether holding Alt+A sends key repeats to the focused app.
+- **Next:** the pointer during speech ("this" / "here" → where the pointer was when the word was said, using word timestamps); optional spoken replies.
+
 ## 5. What the agent is told (Prompts.cs)
 
 1. **Identity and input:** what Computah sends (image 1 scaled, image 2 crop, app, pointer, selection), and that withheld items must not be fetched another way. Reply style: short, plain text.

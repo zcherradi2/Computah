@@ -77,6 +77,55 @@
           }
         }
       },
+      "NAudio.Core/3.3.0": {
+        "type": "package",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        },
+        "compile": {
+          "lib/net9.0/NAudio.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/NAudio.Core.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "NAudio.Midi/3.3.0": {
+        "type": "package",
+        "dependencies": {
+          "NAudio.Core": "3.3.0"
+        },
+        "compile": {
+          "lib/net9.0/NAudio.Midi.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/NAudio.Midi.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "NAudio.WinMM/3.3.0": {
+        "type": "package",
+        "dependencies": {
+          "NAudio.Core": "3.3.0",
+          "NAudio.Midi": "3.3.0"
+        },
+        "compile": {
+          "lib/net9.0/NAudio.WinMM.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/NAudio.WinMM.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "SQLite/3.53.4": {
         "type": "package",
         "compile": {
@@ -250,6 +299,53 @@
         "runtime": {
           "lib/net8.0-windows7.0/SQLitePCLRaw.provider.e_sqlite3.dll": {}
         }
+      },
+      "System.Numerics.Tensors/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/System.Numerics.Tensors.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/System.Numerics.Tensors.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      },
+      "Whisper.net/1.9.1": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.2.0"
+        },
+        "compile": {
+          "lib/net10.0/Whisper.net.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net10.0/Whisper.net.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Whisper.net.Runtime/1.9.1": {
+        "type": "package",
+        "dependencies": {
+          "Whisper.net.Runtime.Metal": "1.9.1"
+        },
+        "build": {
+          "build/Whisper.net.Runtime.targets": {}
+        }
+      },
+      "Whisper.net.Runtime.Metal/1.9.1": {
+        "type": "package",
+        "build": {
+          "build/Whisper.net.Runtime.Metal.targets": {}
+        }
       }
     }
   },
@@ -343,6 +439,59 @@
         "lib/netstandard2.0/Microsoft.Extensions.AI.Abstractions.xml",
         "microsoft.extensions.ai.abstractions.10.5.1.nupkg.sha512",
         "microsoft.extensions.ai.abstractions.nuspec"
+      ]
+    },
+    "NAudio.Core/3.3.0": {
+      "sha512": "xU3f1/5jBTfdjauhcPbjo0O1Ow+PVTPnjMo0KbV7twkWRcoY3GnVmA3mbUXxAePtJ2eUbWgteHWfFjOAvGovLg==",
+      "type": "package",
+      "path": "naudio.core/3.3.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "_manifest/spdx_2.2/manifest.spdx.json",
+        "_manifest/spdx_2.2/manifest.spdx.json.sha256",
+        "lib/net9.0/NAudio.Core.dll",
+        "lib/net9.0/NAudio.Core.xml",
+        "naudio-icon.png",
+        "naudio.core.3.3.0.nupkg.sha512",
+        "naudio.core.nuspec"
+      ]
+    },
+    "NAudio.Midi/3.3.0": {
+      "sha512": "ha7yD5Pf2YjBlk31T2ItNl/7rDHhksRjk3KVzxbT4NibVSO7C9IygO02U/pgbrE5CU3M48IvZArLYh7UPxR6QQ==",
+      "type": "package",
+      "path": "naudio.midi/3.3.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "_manifest/spdx_2.2/manifest.spdx.json",
+        "_manifest/spdx_2.2/manifest.spdx.json.sha256",
+        "lib/net9.0-windows10.0.19041/NAudio.Midi.dll",
+        "lib/net9.0-windows10.0.19041/NAudio.Midi.xml",
+        "lib/net9.0/NAudio.Midi.dll",
+        "lib/net9.0/NAudio.Midi.xml",
+        "naudio-icon.png",
+        "naudio.midi.3.3.0.nupkg.sha512",
+        "naudio.midi.nuspec"
+      ]
+    },
+    "NAudio.WinMM/3.3.0": {
+      "sha512": "8E5LCxXDftvBe3/O8fal8HbJt1LB3odYDGvWrRoyK7qTp2i0ELrOcr3ydDR0JIqhdi7AMXPosJFR1gssT5kcuw==",
+      "type": "package",
+      "path": "naudio.winmm/3.3.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "_manifest/spdx_2.2/manifest.spdx.json",
+        "_manifest/spdx_2.2/manifest.spdx.json.sha256",
+        "lib/net9.0/NAudio.WinMM.dll",
+        "lib/net9.0/NAudio.WinMM.xml",
+        "naudio-icon.png",
+        "naudio.winmm.3.3.0.nupkg.sha512",
+        "naudio.winmm.nuspec"
       ]
     },
     "SQLite/3.53.4": {
@@ -455,13 +604,186 @@
         "sqlitepclraw.provider.e_sqlite3.3.0.5.nupkg.sha512",
         "sqlitepclraw.provider.e_sqlite3.nuspec"
       ]
+    },
+    "System.Numerics.Tensors/9.0.0": {
+      "sha512": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A==",
+      "type": "package",
+      "path": "system.numerics.tensors/9.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/System.Numerics.Tensors.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/System.Numerics.Tensors.targets",
+        "lib/net462/System.Numerics.Tensors.dll",
+        "lib/net462/System.Numerics.Tensors.xml",
+        "lib/net8.0/System.Numerics.Tensors.dll",
+        "lib/net8.0/System.Numerics.Tensors.xml",
+        "lib/net9.0/System.Numerics.Tensors.dll",
+        "lib/net9.0/System.Numerics.Tensors.xml",
+        "lib/netstandard2.0/System.Numerics.Tensors.dll",
+        "lib/netstandard2.0/System.Numerics.Tensors.xml",
+        "system.numerics.tensors.9.0.0.nupkg.sha512",
+        "system.numerics.tensors.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
+    "Whisper.net/1.9.1": {
+      "sha512": "82WAKyyMun44cAXE80sP7vIra1oYhbVp2WrnqJm0CISTfMAvint1k/umt0SvsQH+IkDyekZ3BgMdS3Rag9SZ5A==",
+      "type": "package",
+      "path": "whisper.net/1.9.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE",
+        "lib/net10.0-android36.0/Whisper.net.dll",
+        "lib/net10.0-android36.0/Whisper.net.xml",
+        "lib/net10.0-ios26.0/Whisper.net.dll",
+        "lib/net10.0-ios26.0/Whisper.net.xml",
+        "lib/net10.0-maccatalyst26.0/Whisper.net.dll",
+        "lib/net10.0-maccatalyst26.0/Whisper.net.xml",
+        "lib/net10.0-tvos26.0/Whisper.net.dll",
+        "lib/net10.0-tvos26.0/Whisper.net.xml",
+        "lib/net10.0/Whisper.net.dll",
+        "lib/net10.0/Whisper.net.xml",
+        "lib/net8.0/Whisper.net.dll",
+        "lib/net8.0/Whisper.net.xml",
+        "lib/net9.0-android35.0/Whisper.net.dll",
+        "lib/net9.0-android35.0/Whisper.net.xml",
+        "lib/net9.0-ios18.0/Whisper.net.dll",
+        "lib/net9.0-ios18.0/Whisper.net.xml",
+        "lib/net9.0-maccatalyst18.0/Whisper.net.dll",
+        "lib/net9.0-maccatalyst18.0/Whisper.net.xml",
+        "lib/net9.0-tvos18.0/Whisper.net.dll",
+        "lib/net9.0-tvos18.0/Whisper.net.xml",
+        "lib/net9.0/Whisper.net.dll",
+        "lib/net9.0/Whisper.net.xml",
+        "lib/netstandard2.0/Whisper.net.dll",
+        "lib/netstandard2.0/Whisper.net.xml",
+        "readme.md",
+        "whisper.net.1.9.1.nupkg.sha512",
+        "whisper.net.nuspec"
+      ]
+    },
+    "Whisper.net.Runtime/1.9.1": {
+      "sha512": "TipPJkry69VwJ3XL38U082QK5Trqte6NgSOoosuyj/C1eRHabmBbLQ3ujjcDryg5pkXT7wXwAKU5+PxGIJyxkQ==",
+      "type": "package",
+      "path": "whisper.net.runtime/1.9.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "build/Whisper.net.Runtime.targets",
+        "build/android-arm64-v8a/libggml-base-whisper.so",
+        "build/android-arm64-v8a/libggml-cpu-whisper.so",
+        "build/android-arm64-v8a/libggml-whisper.so",
+        "build/android-arm64-v8a/libwhisper.so",
+        "build/android-x86/libggml-base-whisper.so",
+        "build/android-x86/libggml-cpu-whisper.so",
+        "build/android-x86/libggml-whisper.so",
+        "build/android-x86/libwhisper.so",
+        "build/android-x86_64/libggml-base-whisper.so",
+        "build/android-x86_64/libggml-cpu-whisper.so",
+        "build/android-x86_64/libggml-whisper.so",
+        "build/android-x86_64/libwhisper.so",
+        "build/browser-wasm/libggml-base-whisper.a",
+        "build/browser-wasm/libggml-cpu-whisper.a",
+        "build/browser-wasm/libggml-whisper.a",
+        "build/browser-wasm/libwhisper.a",
+        "build/ios-device/libggml-base-whisper.a",
+        "build/ios-device/libggml-blas-whisper.a",
+        "build/ios-device/libggml-cpu-whisper.a",
+        "build/ios-device/libggml-metal-whisper.a",
+        "build/ios-device/libggml-whisper.a",
+        "build/ios-device/libwhisper.a",
+        "build/ios-simulator/libggml-base-whisper.a",
+        "build/ios-simulator/libggml-blas-whisper.a",
+        "build/ios-simulator/libggml-cpu-whisper.a",
+        "build/ios-simulator/libggml-whisper.a",
+        "build/ios-simulator/libwhisper.a",
+        "build/linux-arm/libggml-base-whisper.so",
+        "build/linux-arm/libggml-cpu-whisper.so",
+        "build/linux-arm/libggml-whisper.so",
+        "build/linux-arm/libwhisper.so",
+        "build/linux-arm64/libggml-base-whisper.so",
+        "build/linux-arm64/libggml-cpu-whisper.so",
+        "build/linux-arm64/libggml-whisper.so",
+        "build/linux-arm64/libwhisper.so",
+        "build/linux-x64/libggml-base-whisper.so",
+        "build/linux-x64/libggml-cpu-whisper.so",
+        "build/linux-x64/libggml-whisper.so",
+        "build/linux-x64/libwhisper.so",
+        "build/maccatalyst/libggml-base-whisper.a",
+        "build/maccatalyst/libggml-blas-whisper.a",
+        "build/maccatalyst/libggml-cpu-whisper.a",
+        "build/maccatalyst/libggml-whisper.a",
+        "build/maccatalyst/libwhisper.a",
+        "build/macos-arm64/libggml-base-whisper.dylib",
+        "build/macos-arm64/libggml-blas-whisper.dylib",
+        "build/macos-arm64/libggml-cpu-whisper.dylib",
+        "build/macos-arm64/libggml-metal-whisper.dylib",
+        "build/macos-arm64/libggml-whisper.dylib",
+        "build/macos-arm64/libwhisper.dylib",
+        "build/macos-x64/libggml-base-whisper.dylib",
+        "build/macos-x64/libggml-blas-whisper.dylib",
+        "build/macos-x64/libggml-cpu-whisper.dylib",
+        "build/macos-x64/libggml-whisper.dylib",
+        "build/macos-x64/libwhisper.dylib",
+        "build/tvos-device/libggml-base-whisper.a",
+        "build/tvos-device/libggml-blas-whisper.a",
+        "build/tvos-device/libggml-cpu-whisper.a",
+        "build/tvos-device/libggml-metal-whisper.a",
+        "build/tvos-device/libggml-whisper.a",
+        "build/tvos-device/libwhisper.a",
+        "build/tvos-simulator/libggml-base-whisper.a",
+        "build/tvos-simulator/libggml-blas-whisper.a",
+        "build/tvos-simulator/libggml-cpu-whisper.a",
+        "build/tvos-simulator/libggml-whisper.a",
+        "build/tvos-simulator/libwhisper.a",
+        "build/win-arm64/ggml-base-whisper.dll",
+        "build/win-arm64/ggml-cpu-whisper.dll",
+        "build/win-arm64/ggml-whisper.dll",
+        "build/win-arm64/whisper.dll",
+        "build/win-x64/ggml-base-whisper.dll",
+        "build/win-x64/ggml-cpu-whisper.dll",
+        "build/win-x64/ggml-whisper.dll",
+        "build/win-x64/whisper.dll",
+        "build/win-x86/ggml-base-whisper.dll",
+        "build/win-x86/ggml-cpu-whisper.dll",
+        "build/win-x86/ggml-whisper.dll",
+        "build/win-x86/whisper.dll",
+        "content/readme.md",
+        "whisper.net.runtime.1.9.1.nupkg.sha512",
+        "whisper.net.runtime.nuspec"
+      ]
+    },
+    "Whisper.net.Runtime.Metal/1.9.1": {
+      "sha512": "Ut5tZyCUwXMVdThoLvdvQ7GyLwjRMreR/p3LuMJvRiXidQ2AXxx2Tv8UOGtMxvL395AC3+IkHdN/kMfd+EPSEw==",
+      "type": "package",
+      "path": "whisper.net.runtime.metal/1.9.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "build/Whisper.net.Runtime.Metal.targets",
+        "build/ggml-metal.metal",
+        "content/readme.md",
+        "whisper.net.runtime.metal.1.9.1.nupkg.sha512",
+        "whisper.net.runtime.metal.nuspec"
+      ]
     }
   },
   "projectFileDependencyGroups": {
     "net10.0-windows": [
       "Anthropic >= 13.10.0",
       "AvalonEdit >= 6.3.1.120",
-      "Microsoft.Data.Sqlite >= 11.0.0"
+      "Microsoft.Data.Sqlite >= 11.0.0",
+      "NAudio.WinMM >= 3.3.0",
+      "Whisper.net >= 1.9.1",
+      "Whisper.net.Runtime >= 1.9.1"
     ]
   },
   "packageFolders": {
@@ -529,6 +851,18 @@
           "Microsoft.Data.Sqlite": {
             "target": "Package",
             "version": "[11.0.0, )"
+          },
+          "NAudio.WinMM": {
+            "target": "Package",
+            "version": "[3.3.0, )"
+          },
+          "Whisper.net": {
+            "target": "Package",
+            "version": "[1.9.1, )"
+          },
+          "Whisper.net.Runtime": {
+            "target": "Package",
+            "version": "[1.9.1, )"
           }
         },
         "imports": [

@@ -232,7 +232,7 @@ static class ContextCapture
         int[] held = { Native.VK_MENU, Native.VK_CONTROL, Native.VK_SHIFT, Native.VK_A, Native.VK_LWIN, Native.VK_RWIN };
         while (held.Any(Native.IsDown))
         {
-            if (sw.ElapsedMilliseconds > 2500) return; // keys still held: give up rather than send a wrong combo
+            if (sw.ElapsedMilliseconds > 125000) return; // keys still held (hold-to-talk lasts up to 2 min): give up rather than send a wrong combo
             await Task.Delay(10);
         }
         if (Native.GetForegroundWindow() != c.ForegroundHwnd) return;

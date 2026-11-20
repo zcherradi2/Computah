@@ -96,6 +96,26 @@ sealed class AssistHost : IDisposable
             diff.Checked = st.ScreenDiff;
         };
         menu.Items.Add(sight);
+        var voice = new WF.ToolStripMenuItem("Voice");
+        var voiceOn = new WF.ToolStripMenuItem("Hold the hotkey to talk (and mic button)") { CheckOnClick = true };
+        voiceOn.Click += (_, _) => { var s = Settings.Load(); s.Voice = voiceOn.Checked; s.Save(); };
+        voice.DropDownItems.Add(voiceOn);
+        voice.DropDownItems.Add(new WF.ToolStripSeparator());
+        foreach (var m in Voice.Models)
+        {
+            var item = new WF.ToolStripMenuItem(m.Label) { Tag = m.Id };
+            item.Click += (_, _) => { var s = Settings.Load(); s.VoiceModel = m.Id; s.Save(); };
+            voice.DropDownItems.Add(item);
+        }
+        voice.DropDownOpening += (_, _) =>
+        {
+            var st = Settings.Load();
+            voiceOn.Checked = st.Voice;
+            var current = Voice.ModelFor(st);
+            foreach (var i in voice.DropDownItems.OfType<WF.ToolStripMenuItem>().Where(i => i.Tag is string))
+                i.Checked = (string)i.Tag! == current.Id;
+        };
+        menu.Items.Add(voice);
         var showDock = new WF.ToolStripMenuItem("Show floating button") { Checked = settings.ShowDock, CheckOnClick = true };
         showDock.CheckedChanged += (_, _) => { var s = Settings.Load(); s.ShowDock = showDock.Checked; s.Save(); SetDockVisible(showDock.Checked); };
         menu.Items.Add(showDock);
@@ -175,6 +195,8 @@ sealed class AssistHost : IDisposable
         busy = true;
         busyHotkey = hotkey;
         sendQueued = false;
+        holdWindow = null;
+        if (settings.Voice) WatchHold(hotkey);
         try
         {
             // The session this capture goes to. Alt+A pressed again while its popup is still unsent
@@ -200,6 +222,7 @@ sealed class AssistHost : IDisposable
                 w = OpenBubble(rec, agent, settings);
             }
             SetFocused(rec);
+            holdWindow = w;
 
             // The window Computah was called from becomes (or refreshes) a playground of this session.
             if (Playgrounds.From(ctx) is { } pg)
@@ -224,6 +247,45 @@ sealed class AssistHost : IDisposable
             tray.ShowBalloonTip(4000, "Computah", ex.Message, WF.ToolTipIcon.Error);
         }
         finally { busy = false; }
+    }
+
+    BubbleWindow? holdWindow; // the bubble the current capture went to (hold-to-talk sends there)
+
+    /// Hold to talk: A still held 350 ms after the chord → record until it (or Alt) is released, then the bubble
+    /// transcribes and sends it. Tapping (the usual press) or double-tapping is unaffected.
+    async void WatchHold(int hotkey)
+    {
+        bool needCtrl = hotkey == HotkeyContinue;
+        bool Held() => Native.IsDown(Native.VK_A) && Native.IsDown(Native.VK_MENU) && (!needCtrl || Native.IsDown(Native.VK_CONTROL));
+        var sw = Stopwatch.StartNew();
+        Recorder? rec = null;
+        BubbleWindow? shown = null;
+        try
+        {
+            while (Held())
+            {
+                if (rec == null && sw.ElapsedMilliseconds > 350)
+                {
+                    if (!Recorder.HasMicrophone) { tray.ShowBalloonTip(3000, "Computah", "No microphone found.", WF.ToolTipIcon.Warning); return; }
+                    rec = new Recorder();
+                    rec.Start();
+                }
+                if (rec != null && shown == null && holdWindow is { } w) { w.ShowListening(rec); shown = w; }
+                if (sw.Elapsed > TimeSpan.FromMinutes(2)) break;
+                await Task.Delay(15);
+            }
+            if (rec == null) return;
+            var samples = rec.Stop();
+            while (busy) await Task.Delay(20); // the capture finishes (and the selection is grabbed) after the release
+            var target = holdWindow ?? shown;
+            if (target != null && !target.IsClosed) target.SendVoice(samples);
+        }
+        catch (Exception ex)
+        {
+            Paths.Log("hold to talk: " + ex);
+            tray.ShowBalloonTip(3000, "Computah", "Voice input: " + ex.Message, WF.ToolTipIcon.Warning);
+        }
+        finally { rec?.Dispose(); }
     }
 
     bool chordHeld;

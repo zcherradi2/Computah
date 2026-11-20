@@ -78,6 +78,10 @@ public sealed class Settings
     /// Send a window the agent saw recently as its changes only, instead of its whole element list again
     /// (see ScreenMemory). Element numbers stay stable either way.
     public bool ScreenDiff { get; set; } = true;
+    /// Voice input: hold the hotkey (keep A down) and talk, or click the mic in the bubble. Transcribed on this machine.
+    public bool Voice { get; set; } = true;
+    public string VoiceModel { get; set; } = "base";      // see Voice.Models: "base" (fast) or "small" (more accurate)
+    public string VoiceLanguage { get; set; } = "auto";   // or a language code: "en", "fr", "ar"...
     public bool LoadMcpServers { get; set; } = false;    // MCP servers slow down startup
     public string AllowedTools { get; set; } = "";       // e.g. "Read WebSearch WebFetch"
 

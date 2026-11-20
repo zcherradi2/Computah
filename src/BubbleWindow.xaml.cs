@@ -107,6 +107,7 @@ public partial class BubbleWindow : Window
         this.resumeId = resumeId;
         this.sharedPaths = sharedPaths ?? new List<string>();
         InitializeComponent();
+        MicBtn.Visibility = settings.Voice ? Visibility.Visible : Visibility.Collapsed;
         AllowDrop = true;
         PreviewDragOver += (_, e) =>
         {
@@ -164,7 +165,114 @@ public partial class BubbleWindow : Window
         foreach (var a in attachments.Where(a => a.Path != null)) sharedPaths.Remove(a.Path!);
         closed = true;
         CompositionTarget.Rendering -= OnFrame;
+        recorder?.Dispose();
         session?.Dispose();
+    }
+
+    // ---------- voice ----------
+
+    Recorder? recorder;       // the mic button's own recording
+    Recorder? listeningTo;    // the recording the level display follows (the mic button's or the hotkey's)
+    bool transcribing;
+    bool spoken;              // the next Send carries a transcript
+    static readonly Brush ComposerBorder = new SolidColorBrush(Color.FromArgb(0x2E, 0xFF, 0xFF, 0xFF));
+
+    void Mic_Click(object sender, RoutedEventArgs e)
+    {
+        if (recorder != null)
+        {
+            var samples = recorder.Stop();
+            recorder.Dispose();
+            recorder = null;
+            SendVoice(samples);
+            return;
+        }
+        if (transcribing) return;
+        if (!Recorder.HasMicrophone) { AddNote("No microphone found."); return; }
+        try
+        {
+            recorder = new Recorder();
+            ShowListening(recorder, "Listening… click the mic again to send");
+            recorder.Start();
+        }
+        catch (Exception ex)
+        {
+            Paths.Log("mic: " + ex);
+            recorder?.Dispose();
+            recorder = null;
+            SetVoiceState(null);
+            AddNote("Couldn't open the microphone: " + ex.Message);
+        }
+    }
+
+    /// Shows that a recording is running (the mic button's, or the hotkey's while it is held), with the input level.
+    public void ShowListening(Recorder r, string text = "Listening… release to send")
+    {
+        listeningTo = r;
+        MicGlyph.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x5A, 0x5A));
+        SetVoiceState(text);
+        r.Level += level => Dispatcher.BeginInvoke(() =>
+        {
+            if (listeningTo != r) return;
+            var a = (byte)Math.Clamp(0x40 + level * 0xBF, 0x40, 0xFF);
+            Composer.BorderBrush = new SolidColorBrush(Color.FromArgb(a, 0xD9, 0x77, 0x57));
+        });
+    }
+
+    /// Transcribes on this machine (downloading the speech model the first time), then sends like typed text.
+    public async void SendVoice(float[] samples)
+    {
+        if (closed) return;
+        listeningTo = null;
+        MicGlyph.ClearValue(TextBlock.ForegroundProperty);
+        Composer.BorderBrush = ComposerBorder;
+        var s = Settings.Load();
+        var model = Voice.ModelFor(s);
+        transcribing = true;
+        try
+        {
+            if (!Voice.IsReady(model))
+            {
+                SetVoiceState($"Downloading the speech model ({model.Bytes / 1_000_000} MB, only once)…");
+                await Voice.EnsureModelAsync(model, new Progress<double>(p => SetVoiceState($"Downloading the speech model (only once)… {p:P0}")),
+                                             System.Threading.CancellationToken.None);
+            }
+            SetVoiceState("Transcribing…");
+            var prompt = Voice.PromptFrom(pendingCtx, pendingCtx?.Elements ?? lastScreen?.Elements);
+            var text = await Voice.TranscribeAsync(model, samples, prompt, s.VoiceLanguage, System.Threading.CancellationToken.None);
+            SetVoiceState(null);
+            if (closed) return;
+            if (text.Length == 0)
+            {
+                const string missed = "Didn't catch that. Try again, or type.";
+                SetVoiceState(missed);
+                await Task.Delay(3500);
+                if (voiceState == missed) SetVoiceState(null);
+                return;
+            }
+
+            var typed = Input.Text.Trim();
+            var full = typed.Length > 0 ? typed + " " + text : text;
+            if (pendingCtx != null) { spoken = true; Input.Text = full; SendAsIs(); }   // a capture is waiting: send with it
+            else if (!streaming && !acting) { spoken = true; Input.Clear(); Send(full); } // a follow-up
+            else { Input.Text = full; Input.CaretIndex = full.Length; }         // busy: leave it to send
+        }
+        catch (Exception ex)
+        {
+            Paths.Log("voice: " + ex);
+            SetVoiceState(null);
+            AddNote("Voice input failed: " + ex.Message);
+        }
+        finally { transcribing = false; }
+    }
+
+    string? voiceState;
+
+    void SetVoiceState(string? text)
+    {
+        voiceState = text;
+        UpdatePlaceholder();
+        if (Header.Visibility == Visibility.Visible) StatusText.Text = text ?? "";
     }
 
     void StartSession(string? resume = null, bool refreshInstructions = false)
@@ -362,7 +470,8 @@ public partial class BubbleWindow : Window
 
     void UpdatePlaceholder()
     {
-        if (attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
+        if (voiceState != null) Placeholder.Text = voiceState; // listening / downloading / transcribing
+        else if (attachments.Count > 0) Placeholder.Text = "Ask, or just press Enter";
         else if (HasConversation) Placeholder.Text = "Ask a follow-up…";
         else Placeholder.Text = $"Ask {agent.Name}…";
         Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -425,6 +534,9 @@ public partial class BubbleWindow : Window
         Attachments.Children.Clear();
         Attachments.Visibility = Visibility.Collapsed;
         if (pendingReport != null) { body = pendingReport + "\n\n" + body; pendingReport = null; }
+        if (spoken && text.Length > 0)
+            body = "[Computah: the user said this aloud; it was transcribed on their machine, so expect small recognition errors.]\n\n" + body;
+        spoken = false;
         if (UndoNews() is { } undo) body = undo + "\n\n" + body;
         if (SessionContext?.Invoke() is { } sc && (sc != sentContext || session == null || SessionId == null))
         {

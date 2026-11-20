@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "pyleWK/91Ss=",
+  "dgSpecHash": "zo3cJhDJmis=",
   "success": true,
   "projectFilePath": "C:\\Users\\Zakaria\\Desktop\\Computah\\Computah.csproj",
   "expectedPackageFiles": [
@@ -9,11 +9,18 @@
     "C:\\Users\\Zakaria\\.nuget\\packages\\microsoft.data.sqlite\\11.0.0\\microsoft.data.sqlite.11.0.0.nupkg.sha512",
     "C:\\Users\\Zakaria\\.nuget\\packages\\microsoft.data.sqlite.core\\11.0.0\\microsoft.data.sqlite.core.11.0.0.nupkg.sha512",
     "C:\\Users\\Zakaria\\.nuget\\packages\\microsoft.extensions.ai.abstractions\\10.5.1\\microsoft.extensions.ai.abstractions.10.5.1.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\naudio.core\\3.3.0\\naudio.core.3.3.0.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\naudio.midi\\3.3.0\\naudio.midi.3.3.0.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\naudio.winmm\\3.3.0\\naudio.winmm.3.3.0.nupkg.sha512",
     "C:\\Users\\Zakaria\\.nuget\\packages\\sqlite\\3.53.4\\sqlite.3.53.4.nupkg.sha512",
     "C:\\Users\\Zakaria\\.nuget\\packages\\sqlitepclraw.bundle_e_sqlite3\\3.0.5\\sqlitepclraw.bundle_e_sqlite3.3.0.5.nupkg.sha512",
     "C:\\Users\\Zakaria\\.nuget\\packages\\sqlitepclraw.config.e_sqlite3\\3.0.5\\sqlitepclraw.config.e_sqlite3.3.0.5.nupkg.sha512",
     "C:\\Users\\Zakaria\\.nuget\\packages\\sqlitepclraw.core\\3.0.5\\sqlitepclraw.core.3.0.5.nupkg.sha512",
-    "C:\\Users\\Zakaria\\.nuget\\packages\\sqlitepclraw.provider.e_sqlite3\\3.0.5\\sqlitepclraw.provider.e_sqlite3.3.0.5.nupkg.sha512"
+    "C:\\Users\\Zakaria\\.nuget\\packages\\sqlitepclraw.provider.e_sqlite3\\3.0.5\\sqlitepclraw.provider.e_sqlite3.3.0.5.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\system.numerics.tensors\\9.0.0\\system.numerics.tensors.9.0.0.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\whisper.net\\1.9.1\\whisper.net.1.9.1.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\whisper.net.runtime\\1.9.1\\whisper.net.runtime.1.9.1.nupkg.sha512",
+    "C:\\Users\\Zakaria\\.nuget\\packages\\whisper.net.runtime.metal\\1.9.1\\whisper.net.runtime.metal.1.9.1.nupkg.sha512"
   ],
   "logs": []
 }
