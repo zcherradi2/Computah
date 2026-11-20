@@ -168,6 +168,9 @@ static class Prompts
         - glob: find files by name pattern. grep: search file contents with a regular expression.
         - powershell: Windows PowerShell 5.1 (not bash). Read-only commands run directly; commands that change
           anything ask the user first, who may refuse: keep them few and explain why in your reply.
+        Only call a tool when the task needs files or the shell. Don't call one as a warm-up or check before replying
+        or acting on screen (for example, don't view your own empty workspace folder or run "echo ok"); answering,
+        hints and action tags need no tool call.
         Paths are absolute Windows paths. The shell starts in {shellDir}.
         You can read: {string.Join("; ", readable)}
         You can edit: {string.Join("; ", editable)}

@@ -10,11 +10,11 @@
 using System;
 using System.Reflection;
 
-[assembly: System.Reflection.AssemblyMetadataAttribute("ProjectDir", "C:\\Users\\pc\\Desktop\\assist")]
+[assembly: System.Reflection.AssemblyMetadataAttribute("ProjectDir", "C:\\Users\\Zakaria\\Desktop\\Computah")]
 [assembly: System.Reflection.AssemblyCompanyAttribute("Computah")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a1d333ff29820ca2d0bcc73621607a0126fe9122")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cd6334a1c15646ce2d3b48c3620617f465204251")]
 [assembly: System.Reflection.AssemblyProductAttribute("Computah")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Computah")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

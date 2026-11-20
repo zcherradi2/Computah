@@ -1,0 +1,21 @@
+{
+  "agent": "computah-deepseek",
+  "models": {
+    "claude": "sonnet",
+    "qwen": ""
+  },
+  "instruction": "Look at my screen around the mouse pointer, plus any selected text and clipboard content. Work out what I most likely need help with and help directly: answer, explain, fix, translate or suggest the next step. Be concise.",
+  "systemPrompt": "",
+  "control": "on",
+  "showDock": true,
+  "attachClipboard": false,
+  "captureSelection": true,
+  "sendCursorCrop": true,
+  "sight": "narrow",
+  "sightMode": "narrow",
+  "loadMcpServers": false,
+  "allowedTools": "",
+  "thinking": {
+    "computah-deepseek": "high"
+  }
+}

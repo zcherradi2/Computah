@@ -1,0 +1,8 @@
+C:\Users\Zakaria\Desktop\Computah\app\Computah.exe
+C:\Users\Zakaria\Desktop\Computah\app\Computah.dll
+C:\Users\Zakaria\Desktop\Computah\app\Computah.deps.json
+C:\Users\Zakaria\Desktop\Computah\app\Computah.runtimeconfig.json
+C:\Users\Zakaria\Desktop\Computah\app\Computah.pdb
+C:\Users\Zakaria\Desktop\Computah\app\Anthropic.dll
+C:\Users\Zakaria\Desktop\Computah\app\ICSharpCode.AvalonEdit.dll
+C:\Users\Zakaria\Desktop\Computah\app\Microsoft.Extensions.AI.Abstractions.dll
