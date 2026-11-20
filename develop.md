@@ -223,6 +223,14 @@ Every capture also scans the focused window through Windows UI Automation (acces
 - **Moving the view:** `<action type="look" element="N"/>` or `<action type="look" x y/>` centres the next capture there (`ActionRunner.Result.LookAt` → `ContextCapture.CaptureAsync(settings, focus)`).
 - **The screen chip** in the bubble shows the mode: "Screen (narrow)" / "Screen (elements only)".
 
+### Multiple monitors (`src/Monitors.cs`)
+
+- **Numbering:** monitors are 1, 2, … from left to right, then top to bottom.
+- **Which monitor a capture shows:** the hotkey shows the pointer's monitor. The automatic look after actions shows the monitor the agent asked for (`<action type="look" monitor="N"/>`), else the one it looked at (`look element/x/y`), else the one holding the **focused window**, because dialogs and plugin windows often open on the other monitor.
+- **Element list on another monitor:** when the focused window isn't on the captured monitor, the front-most window there is scanned instead.
+- **What the agent is told** (with 2+ monitors, a `MONITORS:` block in each capture): the monitors and which one is shown, where the pointer and the focused window are, and up to 6 windows per monitor. Click-through overlays (GPU overlays, Computah's hints) and cloaked windows are left out.
+- **Hints:** `<hint type="window" title="…" process="…"/>` frames a whole window on any monitor (front-most title match, exact before partial; no title = focused window). `<hint type="monitor" monitor="N"/>` makes a monitor's edges glow with a big label. Neither needs a screenshot, and neither vanishes on hover (the mouse is often already inside); default 8 s. A window hint that finds nothing is reported back to the agent.
+
 ## 5. What the agent is told (Prompts.cs)
 
 1. **Identity and input:** what Computah sends (image 1 scaled, image 2 crop, app, pointer, selection), and that withheld items must not be fetched another way. Reply style: short, plain text.

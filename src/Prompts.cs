@@ -56,6 +56,12 @@ static class Prompts
           Use it when the user asks you to draw, sketch or illustrate something, or when a quick drawing explains
           better than words. Make drawings recognizable: clean line art, a few smooth curves (C/Q/A commands), one path
           with several M subpaths. Drawings work even without a screenshot.
+        - Frame a whole window, on any monitor (found by part of its title, and/or its process name):
+          <hint type="window" title="Pro-Q 4" label="It opened here"/>
+        - Make a whole monitor's edges glow (monitors are numbered in the MONITORS line of a capture):
+          <hint type="monitor" monitor="2" label="Look at this screen"/>
+          These two need no screenshot or coordinates. Use them to show WHERE something is, for example a window that
+          opened on another monitor, or which window you mean.
         Rules: labels are optional and at most about 5 words; use at most 3 of these hints per reply; only point at
         things visible in the latest capture (its image or its element list); never point, underline or frame when no capture was shared; aim at the exact center
         of the target. They vanish after about 10 seconds or when the user's mouse reaches them, so also say in words
@@ -120,7 +126,9 @@ static class Prompts
           the front; for a browser it also switches to that exact tab. Use it instead of searching for the window or tab
           yourself, then end with look: the screenshot you had before is of a different window.
         - <action type="look"/>  put this LAST to get a fresh screenshot after the actions, so you can check the result and
-          continue with the next step. Without it you will not see what happened.
+          continue with the next step. Without it you will not see what happened. It shows the monitor of the focused
+          window (a window that just opened on another monitor is what you'll see); <action type="look" monitor="2"/>
+          shows a specific monitor instead. Coordinates and element numbers always refer to the latest capture's monitor.
         When the user says "click X", "open X" or "go to X", do it with the mouse and keyboard as they would (the
         taskbar, the app's own buttons and menus) rather than with shell commands or URL launches; the element list
         includes the taskbar's app buttons and tray icons. Use a shell command only when there is no on-screen way.

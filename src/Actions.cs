@@ -15,7 +15,7 @@ static class ActionRunner
     /// Computah then takes one and asks the agent to re-issue them.
     /// LookAt: where the next screenshot should be centred (narrow sight), when the look action named a spot.
     public sealed record Result(bool Look, string? Stopped, List<string> Done, List<string>? HeldBack = null, string? HeldBackWhy = null,
-                                System.Drawing.Point? LookAt = null);
+                                System.Drawing.Point? LookAt = null, int? LookMonitor = null);
 
     /// Plain-language description, for the approval card and the report back to the agent.
     public static string Describe(HintTag a) => (a.Get("type") ?? "").ToLowerInvariant() switch
@@ -28,7 +28,7 @@ static class ActionRunner
         "drag" => $"Drag from ({a.Get("x1")}, {a.Get("y1")}) to ({a.Get("x2")}, {a.Get("y2")})",
         "move" => $"Move the mouse to ({a.Get("x")}, {a.Get("y")})",
         "wait" => $"Wait {a.Get("ms")} ms",
-        "look" => a.Get("element") is { } le ? $"Look around element {le}" : a.Get("x") != null ? $"Look around ({a.Get("x")}, {a.Get("y")})" : "Take a new screenshot",
+        "look" => a.Get("monitor") is { } lm ? $"Look at monitor {lm}" : a.Get("element") is { } le ? $"Look around element {le}" : a.Get("x") != null ? $"Look around ({a.Get("x")}, {a.Get("y")})" : "Take a new screenshot",
         "focus" => $"Bring playground {a.Get("playground") ?? a.Get("title")} to the front",
         var t => $"Unknown action \"{t}\"",
     };
@@ -52,6 +52,7 @@ static class ActionRunner
         }
 
         System.Drawing.Point? lookAt = null;
+        int? lookMonitor = null;
         bool stale = map == null; // no screenshot yet, or the screen switched windows since
         string staleWhy = "there was no current screenshot to aim with";
         for (int ai = 0; ai < actions.Count; ai++)
@@ -64,6 +65,8 @@ static class ActionRunner
             if (type == "look")
             {
                 look = true;
+                // look monitor="N": the next capture shows that monitor
+                if (int.TryParse(a.Get("monitor"), out var mn) && Monitors.Get(mn) != null) { lookMonitor = mn; continue; }
                 // look element="N" / x,y: centre the next (narrow) view there
                 if (map != null && !stale && (a.Get("element") != null || a.Get("x") != null) && map.ResolveElement(a, "look") && Target(a, "x", "y", map) is { } at)
                     lookAt = new System.Drawing.Point((int)at.X, (int)at.Y);
@@ -155,7 +158,7 @@ static class ActionRunner
             done.Add(Describe(a));
             await Task.Delay(140);
         }
-        return new(look, null, done, LookAt: lookAt);
+        return new(look, null, done, LookAt: lookAt, LookMonitor: lookMonitor);
     }
 
     static Point? Target(HintTag a, string kx, string ky, ScreenMap map)

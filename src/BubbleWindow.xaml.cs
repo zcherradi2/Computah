@@ -769,7 +769,12 @@ public partial class BubbleWindow : Window
             await Task.Delay(450);  // let the screen settle
             try
             {
-                shot = await ContextCapture.CaptureAsync(Settings.Load(), res.LookAt);
+                // Which monitor to show: the one the agent asked for, else the one it looked at, else the one holding
+                // the focused window (a dialog or plugin window often opens on another monitor than the pointer's).
+                var mon = res.LookMonitor is int n ? Monitors.Get(n)
+                        : res.LookAt is { } la ? WF.Screen.FromPoint(la).Bounds
+                        : Monitors.MonitorOf(Native.GetForegroundWindow());
+                shot = await ContextCapture.CaptureAsync(Settings.Load(), res.LookAt, mon);
                 await shot.WaitForElements(2500); // the element list makes the next clicks exact
             }
             catch (Exception ex) { Paths.Log("look: " + ex.Message); }
@@ -1013,6 +1018,14 @@ public partial class BubbleWindow : Window
             hints = hints.Except(peeks).ToList();
             if (hints.Count == 0) return;
         }
+        // a whole window or a whole monitor: found by title / number, on whichever monitor it is, no screenshot needed
+        var placed = hints.Where(h => h.Type is "window" or "monitor" or "screen").ToList();
+        if (placed.Count > 0)
+        {
+            foreach (var h in placed.Take(3)) ShowPlacedHint(h);
+            hints = hints.Except(placed).ToList();
+            if (hints.Count == 0) return;
+        }
         // Without a screenshot there's nothing to point at, but drawings can still go in the middle of this screen.
         var map = lastScreen;
         if (map == null)
@@ -1037,6 +1050,55 @@ public partial class BubbleWindow : Window
             o.Show();
         }
         foreach (var h in hints.Take(5)) overlay.Add(h, map);
+    }
+
+    /// &lt;hint type="window" title="..." process="..."/&gt; frames that window; &lt;hint type="monitor" monitor="N"/&gt;
+    /// makes that monitor's edges glow. Each gets its own overlay on the monitor it targets.
+    void ShowPlacedHint(HintTag h)
+    {
+        System.Drawing.Rectangle mon, target;
+        string type;
+        if (h.Type == "window")
+        {
+            var title = h.Get("title") ?? h.Get("window") ?? h.Get("name");
+            var win = Monitors.Find(title, h.Get("process") ?? h.Get("app"));
+            if (win == null)
+            {
+                AddNote($"Couldn't find a window called \"{title ?? h.Get("process")}\".");
+                pendingReport = (pendingReport != null ? pendingReport + "\n" : "") +
+                                $"[Computah] Your window hint found no visible window matching \"{title ?? h.Get("process")}\".";
+                return;
+            }
+            mon = Monitors.MonitorOf(win.Handle);
+            target = System.Drawing.Rectangle.Intersect(win.Rect, mon);
+            type = "window-frame";
+        }
+        else
+        {
+            var n = h.Num("monitor");
+            if (double.IsNaN(n)) n = h.Num("n");
+            if (double.IsNaN(n) || Monitors.Get((int)n) is not { } m)
+            {
+                AddNote($"There is no monitor {h.Get("monitor") ?? "(missing number)"}.");
+                return;
+            }
+            mon = target = m;
+            type = "monitor-frame";
+        }
+        if (target.Width <= 0 || target.Height <= 0) return;
+
+        var tag = new HintTag { Name = "hint" };
+        tag.Attr["type"] = type;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        tag.Attr["x"] = (target.X - mon.X).ToString(inv);
+        tag.Attr["y"] = (target.Y - mon.Y).ToString(inv);
+        tag.Attr["w"] = target.Width.ToString(inv);
+        tag.Attr["h"] = target.Height.ToString(inv);
+        if (h.Label != null) tag.Attr["label"] = h.Label;
+        tag.Attr["seconds"] = h.Get("seconds") ?? "8";
+        var o = new HintOverlay(mon);
+        o.Show();
+        o.Add(tag, ScreenMap.Identity(mon));
     }
 
     // ---------- conversation UI ----------

@@ -34,6 +34,11 @@ public sealed class CapturedContext
     /// perfect | narrow | none (settings.sight at capture time).
     public string Sight = "perfect";
 
+    /// False when the capture shows a monitor the pointer isn't on (after actions, or look monitor="N").
+    public bool PointerOnMonitor = true;
+    /// Monitors, the pointer's and focused window's monitor, windows per monitor (null with a single monitor).
+    public string? MonitorsText;
+
     public bool HasClipboard => ClipboardText != null || ClipboardImageJpeg != null || ClipboardFiles.Count > 0;
 
     /// The focused window's buttons, links, fields... (Windows accessibility), scanned in the background while capturing.
@@ -69,15 +74,23 @@ public sealed class CapturedContext
         sb.AppendLine($"  ProcessName: {ProcessName}");
         sb.AppendLine($"  WindowTitle: {WindowTitle}");
         sb.AppendLine($"  Path: {(ProcessPath.Length > 0 ? ProcessPath : "unknown")}");
-        sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor " +
-                      $"(monitor origin {Monitor.X}, {Monitor.Y} in virtual-screen coordinates).");
+        if (PointerOnMonitor)
+            sb.AppendLine($"Mouse pointer: ({CursorX - Monitor.X}, {CursorY - Monitor.Y}) on a {Monitor.Width}x{Monitor.Height} monitor " +
+                          $"(monitor origin {Monitor.X}, {Monitor.Y} in virtual-screen coordinates).");
+        else
+            sb.AppendLine($"This capture shows a {Monitor.Width}x{Monitor.Height} monitor (origin {Monitor.X}, {Monitor.Y} in virtual-screen " +
+                          "coordinates). The mouse pointer is on another monitor, so it is not in this capture.");
+        if (MonitorsText != null) sb.AppendLine(MonitorsText);
         double s = (double)FullW / Math.Max(1, Monitor.Width);
         if (IncludeScreen && Sight == "perfect")
         {
             sb.AppendLine($"SIGHT: perfect (whole screen). Screen space = Image 1 = {FullW}x{FullH}.");
-            sb.AppendLine($"Image {n++}: the whole monitor scaled to {FullW}x{FullH}; pointer at ({FullCursorX}, {FullCursorY}), marked with a red circle.");
+            sb.AppendLine($"Image {n++}: the whole monitor scaled to {FullW}x{FullH}" +
+                          (PointerOnMonitor ? $"; pointer at ({FullCursorX}, {FullCursorY}), marked with a red circle." : "."));
             if (CropJpeg != null)
-                sb.AppendLine($"Image {n++}: full-resolution {CropW}x{CropH} crop around the pointer; pointer at ({CropCursorX}, {CropCursorY}), red circle.");
+                sb.AppendLine(PointerOnMonitor
+                    ? $"Image {n++}: full-resolution {CropW}x{CropH} crop around the pointer; pointer at ({CropCursorX}, {CropCursorY}), red circle."
+                    : $"Image {n++}: full-resolution {CropW}x{CropH} crop around the focused window's centre.");
         }
         else if (IncludeScreen && Sight == "narrow" && CropJpeg != null)
         {
@@ -132,7 +145,8 @@ static class ContextCapture
     };
 
     /// focus: where a narrow view should be centred (physical screen pixels); default: the pointer.
-    public static async Task<CapturedContext> CaptureAsync(Settings s, Point? focus = null)
+    /// monitor: which monitor to capture; default: the one under the pointer.
+    public static async Task<CapturedContext> CaptureAsync(Settings s, Point? focus = null, Rectangle? monitor = null)
     {
         var c = new CapturedContext { Time = DateTime.Now, Sight = s.SightMode };
         Native.GetCursorPos(out var pt);
@@ -145,10 +159,25 @@ static class ContextCapture
         try { c.ProcessName = Process.GetProcessById((int)pid).ProcessName; } catch { c.ProcessName = "unknown"; }
         try { c.ProcessPath = Native.ProcessPath(pid) ?? ""; } catch { }
 
-        // 1) Screenshot of the monitor under the pointer (grabbed first, before anything changes).
-        var screen = WF.Screen.FromPoint(new Point(pt.X, pt.Y));
-        c.Monitor = screen.Bounds;
-        c.ElementsTask = UiElements.ScanAsync(fg, c.Monitor); // runs alongside the screenshot
+        // 1) Screenshot of the chosen monitor (grabbed first, before anything changes).
+        c.Monitor = monitor ?? WF.Screen.FromPoint(new Point(pt.X, pt.Y)).Bounds;
+        // The element list comes from the focused window, or, when that is on another monitor, the front-most window here.
+        var scan = fg;
+        Rectangle? scanRect = null;
+        if (Monitors.MonitorOf(fg) != c.Monitor && Monitors.Windows().FirstOrDefault(w => Monitors.Get(w.Monitor) == c.Monitor) is { } here)
+        {
+            scan = here.Handle;
+            scanRect = here.Rect;
+        }
+        c.ElementsTask = UiElements.ScanAsync(scan, c.Monitor); // runs alongside the screenshot
+        bool pointerHere = c.Monitor.Contains(pt.X, pt.Y);
+        if (focus == null && !pointerHere) // narrow view: centre on the window instead of a pointer that isn't here
+        {
+            var r = scanRect ?? Monitors.Bounds(fg);
+            focus = new Point(r.X + r.Width / 2, r.Y + r.Height / 2);
+        }
+        c.PointerOnMonitor = pointerHere;
+        c.MonitorsText = Monitors.Describe(c.Monitor, fg, new Point(pt.X, pt.Y));
         var bmp = new Bitmap(c.Monitor.Width, c.Monitor.Height, PixelFormat.Format24bppRgb);
         using (var g = Graphics.FromImage(bmp))
             g.CopyFromScreen(c.Monitor.X, c.Monitor.Y, 0, 0, c.Monitor.Size, CopyPixelOperation.SourceCopy);

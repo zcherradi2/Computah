@@ -224,6 +224,8 @@ public sealed class HintOverlay : Window
             "point" or "pointer" or "click" => PointAt(tag, map),
             "underline" or "line" => Underline(tag, map),
             "box" or "frame" or "highlight" or "rect" => Box(tag, map),
+            "window-frame" => Box(tag, map, sticky: true),
+            "monitor-frame" => Edge(tag),
             "draw" or "drawing" or "sketch" or "svg" => Draw(tag, map),
             _ => null,
         };
@@ -328,7 +330,8 @@ public sealed class HintOverlay : Window
         return new Item { Visual = root, Hit = c => DistToSegment(c, a, b) < 18 };
     }
 
-    Item? Box(HintTag t, ScreenMap map)
+    /// sticky: stays until its time is up instead of vanishing when the mouse reaches it (whole windows).
+    Item? Box(HintTag t, ScreenMap map, bool sticky = false)
     {
         double x = t.Num("x"), y = t.Num("y"), bw = t.Num("w"), bh = t.Num("h");
         if (new[] { x, y, bw, bh }.Any(double.IsNaN) || bw <= 0 || bh <= 0) return null;
@@ -336,6 +339,9 @@ public sealed class HintOverlay : Window
         var b = Local(x + bw, y + bh, t.Image, map);
         var r = new Rect(a, b);
         r.Inflate(4, 4);
+        double sw = monitor.Width / dpi, sh = monitor.Height / dpi;
+        r.Intersect(new Rect(2, 2, Math.Max(1, sw - 4), Math.Max(1, sh - 4))); // a maximized window: keep the frame on screen
+        if (r.IsEmpty) return null;
 
         var root = new Canvas();
         var glow = new Rectangle { Width = r.Width, Height = r.Height, RadiusX = 10, RadiusY = 10, Stroke = GlowBrush, StrokeThickness = 10,
@@ -349,14 +355,40 @@ public sealed class HintOverlay : Window
         {
             var label = MakeLabel(t.Label);
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            Canvas.SetLeft(label, Math.Max(4, r.X));
-            double top = r.Y - label.DesiredSize.Height - 8;
-            Canvas.SetTop(label, top >= 4 ? top : r.Bottom + 8);
+            double lh = label.DesiredSize.Height;
+            Canvas.SetLeft(label, Math.Clamp(r.X, 4, Math.Max(4, sw - label.DesiredSize.Width - 4)));
+            double above = r.Y - lh - 8, below = r.Bottom + 8;
+            Canvas.SetTop(label, above >= 4 ? above : below + lh <= sh - 4 ? below : r.Y + 10); // above, else below, else inside
             root.Children.Add(label);
         }
 
         var hit = r; hit.Inflate(6, 6);
-        return new Item { Visual = root, Hit = c => hit.Contains(c) };
+        return new Item { Visual = root, Hit = c => !sticky && hit.Contains(c) };
+    }
+
+    /// A whole monitor: its edges glow and a label sits at the top, e.g. "Pro-Q opened here".
+    Item Edge(HintTag t)
+    {
+        double sw = monitor.Width / dpi, sh = monitor.Height / dpi;
+        var root = new Canvas();
+        var glow = new Rectangle { Width = sw - 8, Height = sh - 8, RadiusX = 14, RadiusY = 14, Stroke = GlowBrush, StrokeThickness = 18,
+            Opacity = 0.45, Effect = new BlurEffect { Radius = 22 } };
+        var frame = new Rectangle { Width = sw - 8, Height = sh - 8, RadiusX = 14, RadiusY = 14, Stroke = GlowBrush, StrokeThickness = 5,
+            Effect = new DropShadowEffect { Color = Glow, BlurRadius = 18, ShadowDepth = 0, Opacity = 1 } };
+        foreach (var s in new Shape[] { glow, frame }) { Canvas.SetLeft(s, 4); Canvas.SetTop(s, 4); root.Children.Add(s); }
+        frame.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.45, TimeSpan.FromMilliseconds(800)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+        glow.BeginAnimation(OpacityProperty, new DoubleAnimation(0.25, 0.6, TimeSpan.FromMilliseconds(800)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+        if (t.Label != null)
+        {
+            var label = MakeLabel(t.Label);
+            if (label.Child is TextBlock tb) { tb.FontSize = 18; tb.MaxWidth = 520; }
+            label.Padding = new Thickness(16, 8, 16, 9);
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Canvas.SetLeft(label, Math.Max(4, (sw - label.DesiredSize.Width) / 2));
+            Canvas.SetTop(label, 36);
+            root.Children.Add(label);
+        }
+        return new Item { Visual = root, Hit = _ => false };
     }
 
     /// A drawing from the agent: SVG path data (`d`, in a `viewbox`, default 0 0 100 100), drawn as a glowing line that
