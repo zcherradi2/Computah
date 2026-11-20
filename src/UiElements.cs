@@ -12,13 +12,17 @@ namespace Assist;
 
 /// One on-screen element from Windows UI Automation (accessibility): a button, link, field, row, tab, menu item...
 /// Rect is in physical screen pixels.
-public sealed record UiElement(int Id, string Type, string Name, string? Value, Rectangle Rect, bool Enabled);
+public sealed record UiElement(int Id, string Type, string Name, string? Value, Rectangle Rect, bool Enabled, long Window = 0);
+
+/// A window the elements were read from: the focused window, a popup of its app, or the taskbar.
+public sealed record UiWindow(long Handle, string Title, string Process, bool Taskbar);
 
 /// The numbered elements of the focused window at capture time. Agents target them with element="N",
 /// which is much more precise than reading pixel coordinates off a screenshot.
 public sealed class UiMap
 {
-    public List<UiElement> Items { get; } = new();
+    public List<UiElement> Items { get; set; } = new();
+    public List<UiWindow> Windows { get; } = new();
     public UiElement? Get(int id) => Items.FirstOrDefault(e => e.Id == id);
     public long ScanMs { get; init; }
 }
@@ -66,6 +70,7 @@ static class UiElements
         // before it in z-order (EnumWindows goes front to back) and are smaller than most of the screen. Other windows of
         // the same app behind it are hidden, so their elements would be wrong targets.
         var windows = self ? new List<IntPtr>() : new List<IntPtr> { hwnd };
+        var taskbars = new HashSet<IntPtr>();
         bool reachedFocused = false;
         long monitorArea = (long)monitor.Width * monitor.Height;
         EnumWindows((h, _) =>
@@ -90,7 +95,7 @@ static class UiElements
             GetClassName(h, cls, cls.Capacity);
             if (cls.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" && h != hwnd && IsWindowVisible(h) &&
                 GetWindowRect(h, out var r) && Rectangle.Intersect(monitor, Rectangle.FromLTRB(r.L, r.T, r.R, r.B)) is { Width: > 0, Height: > 0 })
-                windows.Add(h);
+            { windows.Add(h); taskbars.Add(h); }
             return true;
         }, IntPtr.Zero);
 
@@ -108,7 +113,7 @@ static class UiElements
                                    .ToArray();
         var cond = new AndCondition(new OrCondition(typeConds), new PropertyCondition(AutomationElement.IsOffscreenProperty, false));
 
-        var raw = new List<(string Type, string Name, string? Value, Rectangle Rect, bool Enabled, bool IsText)>();
+        var raw = new List<(string Type, string Name, string? Value, Rectangle Rect, bool Enabled, bool IsText, long Window)>();
         foreach (var w in windows)
         {
             Rectangle winRect = GetWindowRect(w, out var wr) ? Rectangle.FromLTRB(wr.L, wr.T, wr.R, wr.B) : monitor;
@@ -144,7 +149,7 @@ static class UiElements
                         value = e.GetCachedPropertyValue(ValuePattern.ValueProperty) as string;
                     var enabled = e.GetCachedPropertyValue(AutomationElement.IsEnabledProperty) is bool b ? b : true;
                     var label = isText ? "text" : Interactive.First(i => i.Type == ct).Label;
-                    raw.Add((label, Clip(name), value is { Length: > 0 } ? Clip(value) : null, rect, enabled, isText));
+                    raw.Add((label, Clip(name), value is { Length: > 0 } ? Clip(value) : null, rect, enabled, isText, (long)w));
                 }
                 catch { }
             }
@@ -162,7 +167,14 @@ static class UiElements
 
         var map = new UiMap { ScanMs = sw.ElapsedMilliseconds };
         int id = 1;
-        foreach (var r in chosen) map.Items.Add(new UiElement(id++, r.Type, r.Name, r.Value, r.Rect, r.Enabled));
+        foreach (var r in chosen) map.Items.Add(new UiElement(id++, r.Type, r.Name, r.Value, r.Rect, r.Enabled, r.Window));
+        foreach (var w in windows)
+        {
+            Native.GetWindowThreadProcessId(w, out var wp);
+            string proc;
+            try { proc = Process.GetProcessById((int)wp).ProcessName; } catch { proc = "?"; }
+            map.Windows.Add(new UiWindow((long)w, Native.WindowTitle(w), proc, taskbars.Contains(w)));
+        }
         return map.Items.Count > 0 ? map : null;
     }
 

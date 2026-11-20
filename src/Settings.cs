@@ -75,6 +75,9 @@ public sealed class Settings
     /// full-resolution view around the pointer, movable by the agent, + element list) or "none" (element list only).
     public string Sight { get; set; } = "perfect";
     public string SightMode => Sight?.Trim().ToLowerInvariant() is "narrow" or "none" ? Sight.Trim().ToLowerInvariant() : "perfect";
+    /// Send a window the agent saw recently as its changes only, instead of its whole element list again
+    /// (see ScreenMemory). Element numbers stay stable either way.
+    public bool ScreenDiff { get; set; } = true;
     public bool LoadMcpServers { get; set; } = false;    // MCP servers slow down startup
     public string AllowedTools { get; set; } = "";       // e.g. "Read WebSearch WebFetch"
 

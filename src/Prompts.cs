@@ -32,6 +32,10 @@ static class Prompts
         Computah then aims at that element's exact position, e.g. <hint type="point" element="24" label="Edit test022"/>
         or <hint type="box" element="7"/>. Use the list to find things by name, and the screenshot to understand the
         layout. Use x/y only for things that are not in the list.
+        Element numbers are stable for the whole conversation: a button keeps its number while it stays on screen, and
+        new things get new numbers. The list is grouped by window, and a window you saw recently may come as its changes
+        only ("+" new, "-" gone, "~" changed or moved; everything else is exactly as in the full list of the snapshot
+        it names). Only aim at elements that are in the latest snapshot.
         SIGHT: the user chooses how much you see, and each capture says which. "perfect": the whole screen (Image 1) plus
         a zoomed crop. "narrow": only a full-resolution view of part of the screen (aim inside it with image="2"; move it
         with <action type="look" element="N"/> or x/y in screen space). "none": no image, only the element list (aim with

@@ -99,7 +99,6 @@ public sealed class CapturedContext
         if (!IncludeScreen) withheld.Add("screenshot");
         if (!IncludeSelection && SelectedText != null) withheld.Add("selected text");
         if (!IncludeClipboard && HasClipboard) withheld.Add("clipboard");
-        if (IncludeScreen && Elements is { } ui) sb.AppendLine(UiElements.Describe(ui, Monitor, FullW, FullH));
         if (withheld.Count > 0)
             sb.AppendLine($"The user chose NOT to share: {string.Join(", ", withheld)}. Do not try to obtain it any other way.");
 

@@ -84,10 +84,16 @@ sealed class AssistHost : IDisposable
             item.Click += (_, _) => { var s = Settings.Load(); s.Sight = value; s.Save(); };
             sight.DropDownItems.Add(item);
         }
+        sight.DropDownItems.Add(new WF.ToolStripSeparator());
+        var diff = new WF.ToolStripMenuItem("Send only what changed (element lists)") { CheckOnClick = true };
+        diff.Click += (_, _) => { var s = Settings.Load(); s.ScreenDiff = diff.Checked; s.Save(); };
+        sight.DropDownItems.Add(diff);
         sight.DropDownOpening += (_, _) =>
         {
-            var current = Settings.Load().SightMode;
-            foreach (WF.ToolStripMenuItem i in sight.DropDownItems) i.Checked = (string)i.Tag! == current;
+            var st = Settings.Load();
+            foreach (var i in sight.DropDownItems.OfType<WF.ToolStripMenuItem>().Where(i => i.Tag is string))
+                i.Checked = (string)i.Tag! == st.SightMode;
+            diff.Checked = st.ScreenDiff;
         };
         menu.Items.Add(sight);
         var showDock = new WF.ToolStripMenuItem("Show floating button") { Checked = settings.ShowDock, CheckOnClick = true };

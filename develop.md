@@ -34,7 +34,9 @@ This file covers what has been built so far, how it fits together, and what is s
 |---|---|
 | `settings.json` (project root) | user settings, see below |
 | `screenshots\` | full-size PNG of every capture |
-| `%LOCALAPPDATA%\Computah\sessions.json` | sessions: history, titles, shared paths, workspaces, playgrounds, dock position |
+| `%LOCALAPPDATA%\Computah\computah.db` | SQLite (`src/Db.cs`): sessions, bubble history, built-in agent turns, what each session saw of each window, dock position. Saves append rows; nothing is rewritten whole |
+| `%LOCALAPPDATA%\Computah\images\{thread}\` | images of built-in conversations, one file each (the database stores the path) |
+| `sessions.json.bak`, `threads.bak\` | the old JSON files, imported once into the database on first start and kept as a backup |
 | `%LOCALAPPDATA%\Computah\commands.log` | every command the agent ran and every mouse/keyboard action, with session and permissions; rotates at 5 MB |
 | `%LOCALAPPDATA%\Computah\workspace\` | the agent's working directory: outside any repo, away from the screenshots |
 | `assist.log` | internal error log (see `Paths.LogFile`) |
@@ -52,6 +54,7 @@ This file covers what has been built so far, how it fits together, and what is s
   "attachClipboard": false,          // the clipboard is NOT sent by default
   "captureSelection": true,          // copy the selected text (Ctrl+C) when the hotkey is pressed
   "sendCursorCrop": true,            // second, full-resolution image around the pointer
+  "screenDiff": true,                // element lists: send recently seen windows as changes only
   "loadMcpServers": false,           // false = --strict-mcp-config
   "allowedTools": ""                 // extra Claude --allowedTools rules
 }
@@ -113,7 +116,9 @@ App.cs ─ tray, hotkeys, sessions, dock, panel, opening bubbles, playground rec
 | `BubbleWindow.xaml(.cs)` | the chat bubble: compact input with chips, streaming text, setup strip (workspace/playground chips), permission/approval/access/workspace cards, hint and card routing, action loop, undo/redo news, "what's open on screen" note, focus-back after actions |
 | `PeekWindow.cs` | file card, folder card, change card (diff + tabs + undo/redo), `DescribeOpen()` for the agent |
 | `Diff.cs` | `FileChange` record; line diff (LCS with head/tail trimming) with changed-character spans |
-| `SessionStore.cs` | `SessionRecord` (history, title, shared paths, `Workspaces`, `Playgrounds`), `Workspace`, `Playground`, `SessionStore` |
+| `SessionStore.cs` | `SessionRecord` (history, title, shared paths, `Workspaces`, `Playgrounds`), `Workspace`, `Playground`, `SessionStore` (loads from / saves to the database) |
+| `Db.cs` | the SQLite connection (one, under a lock), schema, `Tx`, and the one-time import of `sessions.json` + `threads\*.json` |
+| `ScreenMemory.cs` | per session and window: stable element numbers and change-only element lists (see "UI element map") |
 | `SharedAccess.cs` | shared paths with an `edit:` prefix mean edits are allowed; helpers |
 | `Playgrounds.cs` | playground creation from a capture, browser URL via UI Automation, `FocusAsync` (window + tab), `Describe()` for the agent |
 | `Titles.cs` | one-shot title generation after the first exchange (`claude -p --model haiku --tools ""`) |
@@ -172,7 +177,8 @@ Computah's own harness, selectable next to Claude Code and Qwen Code. Both conso
   - the screenshots folder is always denied
   - everything else returns "ask with `<request-access/>`"
 - **Edits** raise `FileChanged` directly, so change cards and Undo work. File encoding and CRLF line endings are kept.
-- **Conversations** are stored in `%LOCALAPPDATA%\Computah\threads\{id}.json` (append-only), which is how they resume.
+- **Conversations** are stored in the database (`thread_turns`, one row per turn, appended), with images as files under `images\{thread}\`. That is how they resume.
+- **Pruning:** requests carry only the last 3 to 6 screenshots and the last 8 to 11 element lists; older ones become a one-line note. The cut moves in steps of 4 so the cached prefix stays the same between steps (`BuildMessages`).
 - **Titles** come from one small `claude-haiku-5-5` call.
 - **Shared code:** the bubble talks to both backends through `IAgentSession` (`src/AgentSession.cs`).
 
@@ -194,7 +200,10 @@ Every capture also scans the focused window through Windows UI Automation (acces
   - only visible buttons, links, fields (with their values), dropdowns, checkboxes, tabs (at most 8), menu items, list and tree items, rows, columns and texts
 - **Limits:** at most 180 interactive items and 60 texts, deduplicated and numbered in reading order.
 - **Speed:** about 80 to 190 ms on a large Chrome page.
-- **What the agent sees:** a numbered list (`[48] button "Ajouter gamme" (1478,239)`) with each element's centre in Image 1.
+- **What the agent sees:** a numbered list (`[48] button "Ajouter gamme" (1478,239)`) with each element's centre in Image 1, grouped by window (focused window, its popups, the taskbar), as its own text block.
+- **Stable numbers** (`ScreenMemory`): each session remembers the elements it last saw per window. A new scan is matched against them (same type and name; nearest position when several match), so an element keeps its number for the whole conversation and new ones get new numbers. Kept in `window_views`, so it survives restarts.
+- **Change-only lists** (`settings.screenDiff`, tray → Sight → "Send only what changed"): a window seen recently is sent as `same as in S12 except: + new / - gone / ~ changed or moved`, or `unchanged since S12`. Never chained: always against the last FULL list of that window, only while that list is among the last 8 (still in the agent's context), and only when at most half of it changed; otherwise the full list is sent and becomes the new base. With the setting off, every capture sends full lists (numbers still stable).
+- **Caveat for Claude Code:** Computah can't see when Claude Code compacts its context, so a base list could in theory be summarised away within those 8 snapshots.
 - **Targeting:** hints and actions take `element="N"`, and `ScreenMap.ResolveElement` turns it into exact coordinates: the centre for clicks and points, the box for frames, the bottom edge for underlines. `<action type="type" element="5" text="…"/>` clicks the field first.
 - **Action loop:** a "look" waits up to 2.5 s for the list. Element numbers count as stale after a `focus` action, just like coordinates.
 - **Why:** pixel coordinates are reliable only on models trained for computer use (Claude). The list lets weaker models such as DeepSeek click by name.

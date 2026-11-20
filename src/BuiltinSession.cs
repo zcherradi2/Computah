@@ -144,7 +144,7 @@ sealed class BuiltinSession : IAgentSession
             MaxTokens = 32000,
             System = new List<TextBlockParam> { new() { Text = SystemPrompt(), CacheControl = new CacheControlEphemeral() } },
             Tools = Tools(),
-            Messages = history.Select(ToParam).ToList(),
+            Messages = BuildMessages(),
             CacheControl = new CacheControlEphemeral(), // cache the conversation so far, too
             OutputConfig = ThinkingLevel() is { } level ? new OutputConfig { Effort = level } : null,
         };
@@ -610,8 +610,9 @@ sealed class BuiltinSession : IAgentSession
         public string Type { get; set; } = "text";      // text | image | thinking | redacted_thinking | tool_use | tool_result
         public string? Text { get; set; }
         public string? Signature { get; set; }          // thinking
-        public string? Data { get; set; }               // redacted thinking, or image base64
+        public string? Data { get; set; }               // redacted thinking, or image base64 (until saved to a file)
         public string? MediaType { get; set; }          // image
+        public string? ImagePath { get; set; }          // image, once saved (Threads.InsertTurn)
         public string? Id { get; set; }                 // tool_use
         public string? Name { get; set; }
         public string? InputJson { get; set; }
@@ -648,16 +649,66 @@ sealed class BuiltinSession : IAgentSession
         return turn;
     }
 
-    static MessageParam ToParam(Turn t)
+    // ---------- what the model is sent ----------
+
+    /// Old screenshots and element lists are left out of requests: only the latest few are useful, and every one
+    /// re-sent costs tokens and attention. Pruning moves in steps (PruneStep), not every turn, so the request prefix
+    /// stays the same between steps and keeps hitting the prompt cache. ScreenMemory relies on KeepElementLists:
+    /// it only sends a change-only list when the full list it refers to is still among the kept ones.
+    public const int KeepScreenshots = 3, PruneStep = 4;
+
+    List<MessageParam> BuildMessages()
+    {
+        var shots = new List<int>();
+        var lists = new List<int>();
+        for (int i = 0; i < history.Count; i++)
+        {
+            if (history[i].Role != "user") continue;
+            if (history[i].Blocks.Any(b => b.Type == "image")) shots.Add(i);
+            if (history[i].Blocks.Any(b => b.Type == "text" && ScreenMemory.IsElementList(b.Text))) lists.Add(i);
+        }
+        var dropShots = Oldest(shots, KeepScreenshots);
+        var dropLists = Oldest(lists, ScreenMemory.KeepElementLists);
+        return history.Select((t, i) => ToParam(t, dropShots.Contains(i), dropLists.Contains(i))).ToList();
+    }
+
+    /// The oldest entries beyond `keep`, rounded down to a multiple of PruneStep (so between keep and keep+step-1 stay).
+    static HashSet<int> Oldest(List<int> turns, int keep)
+    {
+        int n = Math.Max(0, turns.Count - keep) / PruneStep * PruneStep;
+        return turns.Take(n).ToHashSet();
+    }
+
+    static string? ImageData(Block b)
+    {
+        if (b.Data != null) return b.Data;
+        try { return b.ImagePath != null && File.Exists(b.ImagePath) ? Convert.ToBase64String(File.ReadAllBytes(b.ImagePath)) : null; }
+        catch (Exception ex) { Paths.Log("image read: " + ex.Message); return null; }
+    }
+
+    static MessageParam ToParam(Turn t, bool dropImages, bool dropElementList)
     {
         var blocks = new List<ContentBlockParam>();
+        bool imageNoted = false;
         foreach (var b in t.Blocks)
         {
             switch (b.Type)
             {
+                case "text" when dropElementList && ScreenMemory.IsElementList(b.Text):
+                    blocks.Add(new TextBlockParam { Text = "[Computah: an older UI element list was removed here to save space. Element numbers stay the same; use the latest list.]" });
+                    break;
                 case "text": if (!string.IsNullOrEmpty(b.Text)) blocks.Add(new TextBlockParam { Text = b.Text }); break;
                 case "image":
-                    blocks.Add(new ImageBlockParam { Source = new Base64ImageSource { Data = b.Data ?? "", MediaType = b.MediaType == "image/png" ? MediaType.ImagePng : MediaType.ImageJpeg } });
+                    var data = dropImages ? null : ImageData(b);
+                    if (data != null)
+                        blocks.Add(new ImageBlockParam { Source = new Base64ImageSource { Data = data, MediaType = b.MediaType == "image/png" ? MediaType.ImagePng : MediaType.ImageJpeg } });
+                    else if (!imageNoted)
+                    {
+                        blocks.Add(new TextBlockParam { Text = dropImages
+                            ? "[Computah: older image(s) removed here to save space; rely on the latest screenshot.]"
+                            : "[Computah: image no longer available.]" });
+                        imageNoted = true;
+                    }
                     break;
                 case "thinking": blocks.Add(new ThinkingBlockParam { Thinking = b.Text ?? "", Signature = b.Signature ?? "" }); break;
                 case "redacted_thinking": blocks.Add(new RedactedThinkingBlockParam { Data = b.Data ?? "" }); break;
@@ -685,32 +736,77 @@ sealed class BuiltinSession : IAgentSession
     }
 }
 
-/// Built-in conversations on disk: %LOCALAPPDATA%\Computah\threads\{id}.json
+/// Built-in conversations: one database row per turn (Db.cs, table thread_turns), appended as the conversation grows.
+/// Images are written once to %LOCALAPPDATA%\Computah\images\{thread}\ and referenced by path.
 static class Threads
 {
-    static string Dir => Path.Combine(Path.GetDirectoryName(Paths.Workspace)!, "threads");
-    static readonly object Gate = new();
+    static readonly Dictionary<string, int> saved = new(); // turns already in the database, per thread
 
     public static List<BuiltinSession.Turn>? Load(string id)
     {
         try
         {
-            var f = Path.Combine(Dir, id + ".json");
-            return File.Exists(f) ? JsonSerializer.Deserialize<List<BuiltinSession.Turn>>(File.ReadAllText(f)) : null;
+            return Db.With(c =>
+            {
+                var list = new List<BuiltinSession.Turn>();
+                using var cmd = Db.Cmd(c, "SELECT role, blocks FROM thread_turns WHERE thread_id=$t ORDER BY seq", ("$t", id));
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                    list.Add(new BuiltinSession.Turn
+                    {
+                        Role = r.GetString(0),
+                        Blocks = JsonSerializer.Deserialize<List<BuiltinSession.Block>>(r.GetString(1)) ?? new(),
+                    });
+                saved[id] = list.Count;
+                return list.Count > 0 ? list : null;
+            });
         }
         catch (Exception ex) { Paths.Log("thread load: " + ex.Message); return null; }
     }
 
+    /// Appends the turns that are new since the last save.
     public static void Save(string id, List<BuiltinSession.Turn> turns)
     {
         try
         {
-            lock (Gate)
+            Db.With(c =>
             {
-                Directory.CreateDirectory(Dir);
-                File.WriteAllText(Path.Combine(Dir, id + ".json"), JsonSerializer.Serialize(turns));
-            }
+                if (!saved.TryGetValue(id, out var n))
+                {
+                    using var cmd = Db.Cmd(c, "SELECT COUNT(*) FROM thread_turns WHERE thread_id=$t", ("$t", id));
+                    n = Convert.ToInt32(cmd.ExecuteScalar());
+                }
+                if (n >= turns.Count) { saved[id] = n; return; }
+                Db.Tx(c, () => { for (int i = n; i < turns.Count; i++) InsertTurn(c, id, i, turns[i]); });
+                saved[id] = turns.Count;
+            });
         }
         catch (Exception ex) { Paths.Log("thread save: " + ex.Message); }
+    }
+
+    /// Writes the turn's images to files (the block keeps only the path) and the turn as a row.
+    internal static void InsertTurn(Microsoft.Data.Sqlite.SqliteConnection c, string id, int seq, BuiltinSession.Turn t)
+    {
+        for (int i = 0; i < t.Blocks.Count; i++)
+        {
+            var b = t.Blocks[i];
+            if (b.Type != "image" || b.Data == null) continue;
+            var dir = Path.Combine(Db.ImagesDir, id);
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, $"{seq:D5}_{i}{(b.MediaType == "image/png" ? ".png" : ".jpg")}");
+            File.WriteAllBytes(file, Convert.FromBase64String(b.Data));
+            b.ImagePath = file;
+            b.Data = null;
+        }
+        Db.Exec(c, "INSERT OR REPLACE INTO thread_turns(thread_id, seq, role, blocks) VALUES($t, $q, $r, $b)",
+            ("$t", id), ("$q", seq), ("$r", t.Role), ("$b", JsonSerializer.Serialize(t.Blocks)));
+    }
+
+    internal static void Delete(Microsoft.Data.Sqlite.SqliteConnection c, string id)
+    {
+        Db.Exec(c, "DELETE FROM thread_turns WHERE thread_id=$t", ("$t", id));
+        saved.Remove(id);
+        try { var dir = Path.Combine(Db.ImagesDir, id); if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+        catch (Exception ex) { Paths.Log("thread images delete: " + ex.Message); }
     }
 }

@@ -370,6 +370,14 @@ public partial class BubbleWindow : Window
 
     // ---------- sending ----------
 
+    /// The capture's UI element list as its own text block: stable numbers, and changes only when settings.screenDiff
+    /// is on (see ScreenMemory). Renumbers ctx.Elements, so call it before building the ScreenMap.
+    string? ElementList(CapturedContext ctx)
+    {
+        if (Record != null) return Record.Screen.Describe(ctx, Settings.Load().ScreenDiff);
+        return ctx.Elements is { } ui ? UiElements.Describe(ui, ctx.Monitor, ctx.FullW, ctx.FullH) : null;
+    }
+
     void Send(string text)
     {
         text = text.Trim();
@@ -389,11 +397,13 @@ public partial class BubbleWindow : Window
         if (ctx != null)
         {
             ctx.IncludeScreen = attachments.Any(a => a.Kind == "screen");
+            var elementList = ctx.IncludeScreen ? ElementList(ctx) : null; // renumbers the elements: before ScreenMap
             if (ctx.IncludeScreen) lastScreen = new ScreenMap(ctx);
             lastTarget = ctx.ForegroundHwnd;
             ctx.IncludeSelection = attachments.Any(a => a.Kind == "selection");
             ctx.IncludeClipboard = attachments.Any(a => a.Kind == "clipboard");
             blocks.AddRange(ctx.ImageBlocks());
+            if (elementList != null) blocks.Add(new { type = "text", text = elementList });
             body = ctx.ContextText() + "\n\n" + body;
             pendingCtx = null;
         }
@@ -783,13 +793,16 @@ public partial class BubbleWindow : Window
             autoTurns++;
             shot.IncludeSelection = false;
             shot.IncludeClipboard = false;
+            var elementList = ElementList(shot); // renumbers the elements: before ScreenMap
             lastScreen = new ScreenMap(shot);
             lastTarget = shot.ForegroundHwnd;
             var note = res.HeldBack is { Count: > 0 } held
                 ? $"[Computah] I ran: {doneText}. I did NOT run the rest ({string.Join("; ", held)}) because {res.HeldBackWhy}. " +
                   "This is the screen now: look at it and re-issue those steps with coordinates from THIS screenshot."
                 : $"[Computah] I ran your actions: {doneText}. This is the screen now. Continue with the next step, or tell the user you're done.";
-            var blocks = new List<object>(shot.ImageBlocks()) { new { type = "text", text = shot.ContextText() + "\n\n" + note } };
+            var blocks = new List<object>(shot.ImageBlocks());
+            if (elementList != null) blocks.Add(new { type = "text", text = elementList });
+            blocks.Add(new { type = "text", text = shot.ContextText() + "\n\n" + note });
             Dispatch(blocks, "", res.HeldBack != null ? "Computah: fresh screen to aim with" : "Computah: screen after actions");
         }
         else
